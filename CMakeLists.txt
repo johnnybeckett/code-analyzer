@@ -12,6 +12,8 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # Find required packages
 find_package(GTest REQUIRED)
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 # find_package(Boost REQUIRED COMPONENTS filesystem system property_tree spirit_qi)
 
 # Add executable
@@ -40,10 +42,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/parser
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${CMAKE_CURRENT_SOURCE_DIR}/src/observers
+    ${JSONCPP_INCLUDE_DIRS}
 )
 
 target_include_directories(UMLGenerator PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${JSONCPP_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -51,11 +55,13 @@ target_link_libraries(${PROJECT_NAME}
     GTest::gtest
     GTest::gtest_main
     Threads::Threads
+    ${JSONCPP_LIBRARIES}
 )
 
 # Link libraries for UML generator
 target_link_libraries(UMLGenerator
     Threads::Threads
+    ${JSONCPP_LIBRARIES}
 )
 
 # Enable testing

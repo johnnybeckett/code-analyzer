@@ -2,6 +2,9 @@
 add_executable(code_analyzer_tests
     gtest/main_test.cpp
     gtest/uml_test.cpp
+    gtest/csharp_test.cpp
+    ../src/parser/csharp_parser.cpp
+    ../src/core/model.cpp
 )
 
 # Link with gtest

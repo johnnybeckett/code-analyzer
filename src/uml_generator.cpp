@@ -4,6 +4,7 @@
 #include <vector>
 #include <regex>
 #include <sstream>
+#include <json/json.h> // Assuming we have JSON library for parsing
 
 /**
  * @brief UML Class Diagram Generator
@@ -63,6 +64,9 @@ private:
      */
     std::string generateHTML() {
         std::ostringstream html;
+
+        // Read and process input JSON files to extract class data
+        std::vector<std::string> class_data = parseInputFiles();
 
         html << "<!DOCTYPE html>\n"
              << "<html lang=\"en\">\n"
@@ -135,22 +139,129 @@ private:
              << "    </div>\n"
              << "\n"
              << "    <script>\n"
-             << "        // This is a simplified placeholder for the 3D visualization\n"
-             << "        // In a real implementation, this would be populated with data from JSON files\n"
-             << "        console.log('UML Diagram loaded successfully');\n"
+             << "        // Process class data and generate 3D visualization\n"
+             << "        const classes = " << getClassesJSON(class_data) << ";\n"
+             << "        console.log('Classes loaded:', classes);\n"
+             << "\n"
+             << "        function init() {\n"
+             << "            // Initialize Three.js scene\n"
+             << "            const scene = new THREE.Scene();\n"
+             << "            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);\n"
+             << "            const renderer = new THREE.WebGLRenderer({ antialias: true });\n"
+             << "            renderer.setSize(window.innerWidth, window.innerHeight);\n"
+             << "            document.getElementById('container').appendChild(renderer.domElement);\n"
+             << "\n"
+             << "            // Add lighting\n"
+             << "            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);\n"
+             << "            scene.add(ambientLight);\n"
+             << "\n"
+             << "            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);\n"
+             << "            directionalLight.position.set(1, 1, 1);\n"
+             << "            scene.add(directionalLight);\n"
+             << "\n"
+             << "            // Create class objects\n"
+             << "            const classObjects = [];\n"
+             << "            for (let i = 0; i < classes.length; i++) {\n"
+             << "                const className = classes[i].name;\n"
+             << "                const geometry = new THREE.BoxGeometry(2, 1, 1);\n"
+             << "                const material = new THREE.MeshPhongMaterial({ color: 0x4285F4 });\n"
+             << "                const cube = new THREE.Mesh(geometry, material);\n"
+             << "\n"
+             << "                // Position classes in a grid\n"
+             << "                cube.position.x = (i % 5) * 3 - 6;\n"
+             << "                cube.position.y = Math.floor(i / 5) * 2;\n"
+             << "                cube.position.z = 0;\n"
+             << "\n"
+             << "                scene.add(cube);\n"
+             << "                classObjects.push({ object: cube, name: className });\n"
+             << "            }\n"
+             << "\n"
+             << "            // Set camera position\n"
+             << "            camera.position.z = 10;\n"
+             << "\n"
+             << "            // Animation loop\n"
+             << "            function animate() {\n"
+             << "                requestAnimationFrame(animate);\n"
+             << "\n"
+             << "                // Rotate all objects slightly\n"
+             << "                scene.rotation.y += 0.005;\n"
+             << "\n"
+             << "                renderer.render(scene, camera);\n"
+             << "            }\n"
+             << "\n"
+             << "            animate();\n"
+             << "\n"
+             << "            // Handle window resize\n"
+             << "            window.addEventListener('resize', function() {\n"
+             << "                camera.aspect = window.innerWidth / window.innerHeight;\n"
+             << "                camera.updateProjectionMatrix();\n"
+             << "                renderer.setSize(window.innerWidth, window.innerHeight);\n"
+             << "            });\n"
+             << "        }\n"
+             << "\n"
+             << "        // Initialize when page loads\n"
+             << "        init();\n"
              << "\n"
              << "        function applyFilter() {\n"
-             << "            alert('Filter functionality would be implemented here');\n"
+             << "            const filterInput = document.getElementById('filterInput');\n"
+             << "            const pattern = new RegExp(filterInput.value);\n"
+             << "            console.log('Applying filter:', pattern);\n"
+             << "            // In a real implementation, this would filter the visualization\n"
              << "        }\n"
              << "\n"
              << "        function resetFilter() {\n"
-             << "            alert('Reset filter functionality would be implemented here');\n"
+             << "            console.log('Resetting filter');\n"
+             << "            // In a real implementation, this would reset the visualization\n"
              << "        }\n"
              << "    </script>\n"
              << "</body>\n"
              << "</html>";
 
         return html.str();
+    }
+
+    /**
+     * @brief Parse input JSON files and extract class data
+     * @return Vector of class data strings
+     */
+    std::vector<std::string> parseInputFiles() {
+        std::vector<std::string> class_data;
+
+        // In a real implementation, this would:
+        // 1. Parse each JSON file
+        // 2. Extract class information from the JSON structure
+        // 3. Return data in a format suitable for visualization
+
+        for (const auto& filename : input_files) {
+            std::ifstream file(filename);
+            if (!file.is_open()) {
+                std::cerr << "Warning: Could not open file " << filename << std::endl;
+                continue;
+            }
+
+            // For now, just return placeholder data
+            class_data.push_back("{\"name\":\"SampleClass\",\"methods\":[],\"variables\":[]}");
+        }
+
+        return class_data;
+    }
+
+    /**
+     * @brief Convert class data to JSON string for JavaScript
+     * @param class_data Vector of class data strings
+     * @return JSON string representation
+     */
+    std::string getClassesJSON(const std::vector<std::string>& class_data) {
+        std::ostringstream json;
+        json << "[";
+
+        for (size_t i = 0; i < class_data.size(); ++i) {
+            if (i > 0) json << ",";
+            json << class_data[i];
+        }
+
+        json << "]";
+        return json.str();
     }
 };
 
