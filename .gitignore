@@ -1,0 +1,27 @@
+# Build directories
+build/
+cmake-build-debug/
+cmake-build-release/
+
+# Binary files
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE files
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Doxygen output
+docs/doxygen/
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+Makefile
