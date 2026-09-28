@@ -255,13 +255,18 @@ private:
         <button onclick="applyFilter()">Apply Filter</button>
         <button class="secondary" onclick="resetFilter()">Reset</button>
         <button class="secondary" onclick="resetView()">Reset View</button>
+        <h3>Layout</h3>
+        <select id="layoutSelect">
+            <option value="linear">Linear (hierarchy)</option>
+            <option value="namespace">Grouped by namespace</option>
+        </select>
         <h3>Colour scheme</h3>
         <select id="themeSelect">
             <option value="dark">Dark</option>
             <option value="light">Light</option>
-            <option value="blue">Blue (vim darkblue)</option>
+            <option value="blue">Vim darkblue</option>
         </select>
-        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus</div>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class, or click its name in the Classes panel, to focus</div>
         <div id="stats"></div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
@@ -282,12 +287,14 @@ private:
                     map.set(c.name, {
                         name: c.name,
                         namespace: c.namespace || '',
+                        file: c.file || '',
                         bases: new Set(),
                         methods: new Map(),
                         vars: new Map(),
                     });
                 }
                 const m = map.get(c.name);
+                if (c.file) m.file = c.file;
                 (c.inheritance || []).forEach(b => m.bases.add(b));
                 (c.methods || []).forEach(mt =>
                     m.methods.set(JSON.stringify([mt.name, mt.parameters || []]), mt));
@@ -296,6 +303,7 @@ private:
             return [...map.values()].map(m => ({
                 name: m.name,
                 namespace: m.namespace,
+                file: m.file,
                 inheritance: [...m.bases],
                 methods: [...m.methods.values()],
                 variables: [...m.vars.values()],
@@ -489,29 +497,6 @@ private:
             children.get(n.parent).push(n);
         }
 
-        // Tidy layout: leaves take consecutive x slots, parents center over
-        // their children; each independent hierarchy gets its own depth slice.
-        const placed = new Set();
-        let cursor = 0;
-        function place(n, depth, z) {
-            if (placed.has(n.name)) return;
-            placed.add(n.name);
-            n.depth = depth;
-            n.z = z;
-            const kids = children.get(n.name) || [];
-            if (!kids.length) { n.x = cursor++; }
-            else {
-                kids.forEach(k => place(k, depth + 1, z));
-                n.x = (kids[0].x + kids[kids.length - 1].x) / 2;
-            }
-        }
-
-        const roots = [...nodes.values()].filter(n => !n.parent);
-        roots.forEach((r, i) => {
-            r.z = (i - (roots.length - 1) / 2) * Z_GAP;
-            place(r, 0, r.z);
-        });
-
         // Build every box (unresolved bases become small dashed stubs)
         for (const n of nodes.values()) {
             const cls = n.cls || { name: n.name, methods: [], variables: [] };
@@ -521,26 +506,152 @@ private:
             n.sideMat = box.side;
         }
 
-        // X pitch keeps adjacent boxes from touching
-        const X_GAP = Math.max(...nodes.values().map(n => n.w)) + 3;
+        // --- Layouts ---
+        // Each layout assigns n.x/n.y/z to every node; applyLayout() then
+        // moves the meshes and rebuilds the arrows, namespace frames and grid.
+        let currentGroups = [];   // namespace frames (namespace layout only)
 
-        // Stack hierarchy levels vertically with clearance
-        const maxDepth = Math.max(...nodes.values().map(n => n.depth));
-        const levelH = Array.from({ length: maxDepth + 1 }, () => 0);
-        for (const n of nodes.values()) levelH[n.depth] = Math.max(levelH[n.depth], n.h);
-        let totalH = 0;
-        for (let d = 0; d <= maxDepth; d++) totalH += levelH[d] + Y_GAP;
-        let acc = 0;
-        const levelY = levelH.map(h => { const y = totalH / 2 - acc - h / 2; acc += h + Y_GAP; return y; });
+        // Tidy placement of one set of classes: leaves take consecutive x
+        // slots, parents center over their children, levels stack vertically.
+        function tidyLayout(list) {
+            const inner = new Set(list.map(n => n.name));
+            const kids = new Map();
+            for (const n of list) {
+                if (!n.parent || !inner.has(n.parent)) continue;
+                if (!kids.has(n.parent)) kids.set(n.parent, []);
+                kids.get(n.parent).push(n);
+            }
+            const placed = new Set();
+            let cursor = 0;
+            const place = n => {
+                if (placed.has(n.name)) return;
+                placed.add(n.name);
+                const ch = kids.get(n.name) || [];
+                if (!ch.length) { n.x = cursor++; }
+                else {
+                    ch.forEach(k => place(k));
+                    n.x = (ch[0].x + ch[ch.length - 1].x) / 2;
+                }
+            };
+            const roots = list.filter(n => !n.parent || !inner.has(n.parent));
+            roots.forEach(r => place(r));
+            const setDepth = (n, d) => {
+                n.depth = d;
+                (kids.get(n.name) || []).forEach(k => setDepth(k, d + 1));
+            };
+            roots.forEach(r => setDepth(r, 0));
 
-        let cx = 0, cz = 0;
-        for (const n of nodes.values()) { cx += n.x; cz += n.z; }
-        cx /= nodes.size; cz /= nodes.size;
-        for (const n of nodes.values()) {
-            n.x = (n.x - cx) * X_GAP;
-            n.y = levelY[n.depth];
-            n.z -= cz;
-            n.mesh.position.set(n.x, n.y, n.z);
+            const X_GAP = Math.max(...list.map(n => n.w)) + 3;  // pitch keeps boxes apart
+            const maxDepth = Math.max(...list.map(n => n.depth));
+            const levelH = Array.from({ length: maxDepth + 1 }, () => 0);
+            for (const n of list) levelH[n.depth] = Math.max(levelH[n.depth], n.h);
+            let totalH = 0;
+            for (let d = 0; d <= maxDepth; d++) totalH += levelH[d] + Y_GAP;
+            let acc = 0;
+            const levelY = levelH.map(h => {
+                const y = totalH / 2 - acc - h / 2; acc += h + Y_GAP; return y;
+            });
+
+            let cx = 0;
+            for (const n of list) { n.x *= X_GAP; n.y = levelY[n.depth]; cx += n.x; }
+            cx /= list.length;
+            for (const n of list) { n.x -= cx; n.z = 0; }
+        }
+
+        // Linear: one tidy layout over all classes; each independent
+        // hierarchy keeps its own depth slice (the original arrangement).
+        function layoutLinear() {
+            const roots = [...nodes.values()].filter(n => !n.parent);
+            const hierarchies = [];
+            for (const r of roots) {
+                const members = [r];
+                const seen = new Set([r.name]);
+                const stack = [...(children.get(r.name) || [])];
+                while (stack.length) {
+                    const k = stack.pop();
+                    if (seen.has(k.name)) continue;
+                    seen.add(k.name);
+                    members.push(k);
+                    (children.get(k.name) || [])
+                        .forEach(c => { if (!seen.has(c.name)) stack.push(c); });
+                }
+                hierarchies.push(members);
+            }
+            hierarchies.forEach((members, i) => {
+                tidyLayout(members);
+                const z = (i - (hierarchies.length - 1) / 2) * Z_GAP;
+                members.forEach(n => { n.z += z; });
+            });
+            let cz = 0;
+            for (const n of nodes.values()) cz += n.z;
+            cz /= nodes.size;
+            nodes.forEach(n => { n.z -= cz; });
+        }
+
+        // Namespace: classes are grouped by namespace, falling back to the
+        // source-file directory; each group sits in its own labelled frame.
+        function groupKey(n) {
+            const c = n.cls;
+            if (!c) return '';
+            const ns = String(c.namespace || '').trim();
+            if (ns) return ns;
+            const parts = String(c.file || '').trim().split('/').filter(Boolean);
+            return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+        }
+
+        const NS_PAD = 3;        // clearance between a group's boxes and its frame
+        const NS_LABEL = 2;     // label strip along the frame's top edge
+        const NS_CELL_X = 22;   // clearance between adjacent frames
+        const NS_CELL_Y = 26;
+
+        function layoutNamespaces() {
+            const groups = new Map();
+            for (const n of nodes.values()) {
+                const key = groupKey(n);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(n);
+            }
+            const keys = [...groups.keys()].sort((a, b) =>
+                (a === '') - (b === '') || a.localeCompare(b));
+
+            const laid = [];
+            for (const key of keys) {
+                const members = groups.get(key);
+                tidyLayout(members);
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (const n of members) {
+                    minX = Math.min(minX, n.x - n.w / 2);
+                    maxX = Math.max(maxX, n.x + n.w / 2);
+                    minY = Math.min(minY, n.y - n.h / 2);
+                    maxY = Math.max(maxY, n.y + n.h / 2);
+                }
+                laid.push({ key, members, minX, minY, maxX, maxY });
+            }
+
+            // Place the groups in a grid, top to bottom, left to right
+            const cols = Math.max(1, Math.round(Math.sqrt(laid.length)));
+            const rows = Math.ceil(laid.length / cols);
+            const cellW = Math.max(...laid.map(g => g.maxX - g.minX)) + NS_PAD * 2 + NS_CELL_X;
+            const cellH = Math.max(...laid.map(g => g.maxY - g.minY)) + NS_PAD * 2 + NS_LABEL + NS_CELL_Y;
+            laid.forEach((g, i) => {
+                const col = i % cols, row = Math.floor(i / cols);
+                const ox = (col - (cols - 1) / 2) * cellW;
+                const oy = (rows - 1 - row) * cellH;
+                const gx = (g.minX + g.maxX) / 2, gy = (g.minY + g.maxY) / 2;
+                g.members.forEach(n => { n.x += ox - gx; n.y += oy - gy; });
+                g.minX += ox - gx; g.maxX += ox - gx;
+                g.minY += oy - gy; g.maxY += oy - gy;
+                g.x = (g.minX + g.maxX) / 2;
+                g.y = (g.minY + g.maxY) / 2 + NS_LABEL / 2;
+                g.w = g.maxX - g.minX + NS_PAD * 2;
+                g.h = g.maxY - g.minY + NS_PAD * 2 + NS_LABEL;
+            });
+
+            currentGroups = laid.map(g => ({
+                label: g.key || '(global)',
+                x: g.x, y: g.y, w: g.w, h: g.h,
+                names: g.members.map(n => n.name),
+            }));
         }
 
         // --- Generalization arrows: stem + hollow triangle at the superclass ---
@@ -564,18 +675,30 @@ private:
             return new THREE.Line(geo, edgeMat);
         }
 
-        const edgeObjs = edges
-            .map(e => ({ from: e.from, to: e.to, line: makeEdge(nodes.get(e.from), nodes.get(e.to)) }))
-            .filter(e => e.line);
-        edgeObjs.forEach(e => diagram.add(e.line));
+        let edgeObjs = [];
+        function rebuildEdges() {
+            for (const e of edgeObjs) {
+                diagram.remove(e.line);
+                e.line.geometry.dispose();   // edgeMat is shared — keep it
+            }
+            edgeObjs = edges
+                .map(e => ({ from: e.from, to: e.to, line: makeEdge(nodes.get(e.from), nodes.get(e.to)) }))
+                .filter(e => e.line);
+            edgeObjs.forEach(e => diagram.add(e.line));
+        }
 
         for (const n of nodes.values()) diagram.add(n.mesh);
 
-        // Faint floor grid as a depth cue (rebuilt when the theme changes)
-        const span = Math.max(...nodes.values().map(n => Math.hypot(n.x, n.y, n.z) + Math.max(n.w, n.h)));
-        const gridY = Math.min(...nodes.values().map(n => n.y - n.h / 2)) - 3;
+        // Faint floor grid as a depth cue (rebuilt when the layout or theme changes)
+        let span = 100, gridY = 0;
+        function computeSpan() {
+            span = Math.max(...nodes.values().map(n => Math.hypot(n.x, n.y, n.z) + Math.max(n.w, n.h)));
+            gridY = Math.min(...nodes.values().map(n => n.y - n.h / 2)) - 3;
+        }
         let grid = null;
-        function buildGrid(c1, c2) {
+        function syncGrid() {
+            const c1 = cur3d ? cur3d.grid[0] : 0x273449;
+            const c2 = cur3d ? cur3d.grid[1] : 0x1b2536;
             if (grid) {
                 diagram.remove(grid);
                 grid.geometry.dispose();
@@ -585,7 +708,70 @@ private:
             grid.position.y = gridY;
             diagram.add(grid);
         }
-        buildGrid(0x273449, 0x1b2536);
+
+        // --- Namespace frames: a labelled, lightly-filled panel behind each group ---
+        function makePanelCanvas(label, w, h) {
+            const px = 1 / WORLD;
+            const W = Math.max(64, Math.ceil(w * px));
+            const H = Math.max(64, Math.ceil(h * px));
+            const canvas = document.createElement('canvas');
+            canvas.width = W; canvas.height = H;
+            const ctx = canvas.getContext('2d');
+            const t = cur3d.panel;
+            ctx.fillStyle = t.fill;
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = t.strip;
+            ctx.fillRect(0, 0, W, 42);
+            ctx.strokeStyle = t.border;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+            ctx.fillStyle = t.text;
+            ctx.font = 'bold 26px Arial, Helvetica, sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, 12, 21);
+            return canvas;
+        }
+
+        let panels = [];
+        function refreshPanels() {
+            for (const p of panels) {
+                diagram.remove(p.mesh);
+                p.mesh.geometry.dispose();
+                if (p.mesh.material.map) p.mesh.material.map.dispose();
+                p.mesh.material.dispose();
+            }
+            panels = [];
+            if (!currentGroups.length || !cur3d) return;
+            for (const g of currentGroups) {
+                const tex = new THREE.CanvasTexture(makePanelCanvas(g.label, g.w, g.h));
+                tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                const mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(g.w, g.h, 0.05),
+                    new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+                mesh.position.set(g.x, g.y, -0.3);   // just behind the class boxes
+                diagram.add(mesh);
+                panels.push({ mesh, names: g.names });
+            }
+        }
+
+        // Switch layout: re-place every node, then rebuild the arrows, the
+        // namespace frames and the grid to match
+        function applyLayout(mode) {
+            if (mode === 'namespace') layoutNamespaces();
+            else { currentGroups = []; layoutLinear(); }
+            for (const n of nodes.values()) n.mesh.position.set(n.x, n.y, n.z);
+            rebuildEdges();
+            refreshPanels();
+            computeSpan();
+            syncGrid();
+            resetView();
+            applyFilter();   // re-apply any active filter to the rebuilt arrows
+        }
+
+        // Initial arrangement; edges, frames and the grid are created once
+        // the theme state exists, at the end of the script
+        layoutLinear();
+        computeSpan();
 
         // --- Camera and interaction ---
         // Orbit camera: the diagram stays put and the camera orbits a target
@@ -708,11 +894,20 @@ private:
         // keeps them legible against any background.
         const THEMES3D = {
             dark:  { bg: 0x0f172a, side: 0x24344d, highlight: 0x4285F4,
-                     grid: [0x273449, 0x1b2536], edge: 0xcbd5e1 },
+                     grid: [0x273449, 0x1b2536], edge: 0xcbd5e1,
+                     panel: { fill: 'rgba(148, 163, 184, 0.10)',
+                              strip: 'rgba(71, 85, 105, 0.95)',
+                              border: '#475569', text: '#e2e8f0' } },
             light: { bg: 0xe2e8f0, side: 0xc7d2e0, highlight: 0x2563eb,
-                     grid: [0xbcc7d6, 0xd8e0ea], edge: 0x475569 },
+                     grid: [0xbcc7d6, 0xd8e0ea], edge: 0x475569,
+                     panel: { fill: 'rgba(51, 65, 85, 0.08)',
+                              strip: 'rgba(148, 163, 184, 0.95)',
+                              border: '#94a3b8', text: '#0f172a' } },
             blue:  { bg: 0x0000a8, side: 0x2b2b9e, highlight: 0x6d8cff,
-                     grid: [0x2f2fae, 0x1a1a70], edge: 0x9db8ff },
+                     grid: [0x2f2fae, 0x1a1a70], edge: 0x9db8ff,
+                     panel: { fill: 'rgba(135, 206, 250, 0.10)',
+                              strip: 'rgba(91, 91, 224, 0.95)',
+                              border: '#5b5be0', text: '#c9d4ff' } },
         };
         let cur3d = THEMES3D.dark;
 
@@ -722,7 +917,8 @@ private:
             document.body.dataset.theme = name;
             scene.background.set(cur3d.bg);
             edgeMat.color.set(cur3d.edge);
-            buildGrid(cur3d.grid[0], cur3d.grid[1]);
+            syncGrid();
+            refreshPanels();
             // Re-tint the box sides, keeping whichever are highlighted now
             for (const n of nodes.values()) {
                 n.sideMat.color.set(n.mesh.scale.x !== 1 ? cur3d.highlight
@@ -812,6 +1008,11 @@ private:
                     html += '<div class="none">no members detected</div>';
                 }
                 card.innerHTML = html;
+                // Clicking the class name flies the camera to that box
+                const title = card.querySelector('h3');
+                title.style.cursor = 'pointer';
+                title.title = 'Click to focus the camera on this class';
+                title.addEventListener('click', () => focusOn(node));
                 sidebar.appendChild(card);
             });
             updateStats();
@@ -844,6 +1045,13 @@ private:
                 const a = nodes.get(e.from), b = nodes.get(e.to);
                 e.line.visible = a.mesh.visible && b.mesh.visible;
             });
+            // A namespace frame stays while any class inside it is shown
+            panels.forEach(p => {
+                p.mesh.visible = p.names.some(name => {
+                    const n = nodes.get(name);
+                    return n && !n.external && n.mesh.visible;
+                });
+            });
             document.querySelectorAll('.classCard').forEach(card => {
                 card.style.display = (!re || re.test(card.dataset.name)) ? '' : 'none';
             });
@@ -875,6 +1083,11 @@ private:
         themeSelect.value = THEMES3D[savedTheme] ? savedTheme : 'dark';
         themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
         applyTheme(themeSelect.value);
+
+        // Layout: linear (the original arrangement) by default
+        const layoutSelect = document.getElementById('layoutSelect');
+        layoutSelect.addEventListener('change', () => applyLayout(layoutSelect.value));
+        applyLayout('linear');
     </script>
 </body>
 </html>)HTMLDOC";
