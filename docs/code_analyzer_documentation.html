@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Analyzer Documentation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+        code {
+            background-color: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .class-diagram {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #3498db;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Code Analyzer Documentation</h1>
+
+        <p>This document describes the structure and functionality of the Code Analyzer system, which is designed to parse source code files and generate structured analysis results.</p>
+
+        <h2>System Overview</h2>
+        <p>The Code Analyzer is a multi-language code parsing system that can analyze C++, C#, and Python source code. It provides:</p>
+        <ul>
+            <li>Language-specific parsers for different programming languages</li>
+            <li>A unified model to represent parsed code elements</li>
+            <li>Analysis capabilities for complex code structures</li>
+            <li>Support for generating UML visualizations</li>
+        </ul>
+
+        <h2>Core Architecture</h2>
+
+        <div class="class-diagram">
+            <h3>Class Structure Overview</h3>
+            <p>The system is built around a core model that represents code elements:</p>
+
+            <table>
+                <tr>
+                    <th>Class</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><code>CodeElement</code></td>
+                    <td>Base class for all code elements with common properties like name, namespace, and visibility</td>
+                </tr>
+                <tr>
+                    <td><code>Class</code></td>
+                    <td>Represents a class in the code with inheritance, methods, and variables</td>
+                </tr>
+                <tr>
+                    <td><code>Method</code></td>
+                    <td>Represents a method/function in the code with parameters, return type, and called methods</td>
+                </tr>
+                <tr>
+                    <td><code>Variable</code></td>
+                    <td>Represents a variable with type, mutability, and access level</td>
+                </tr>
+                <tr>
+                    <td><code>AnalysisResult</code></td>
+                    <td>Container for all parsed classes and their relationships</td>
+                </tr>
+                <tr>
+                    <td><code>Analyzer</code></td>
+                    <td>Main analysis class that coordinates parsing across different languages</td>
+                </tr>
+                <tr>
+                    <td><code>CSharpParser</code></td>
+                    <td>Specialized parser for C# files with regex-based parsing</td>
+                </tr>
+            </table>
+        </div>
+
+        <h2>Key Components</h2>
+
+        <h3>Main Entry Point</h3>
+        <p>The application's main entry point is in <code>src/main.cpp</code>, which handles command-line arguments and coordinates the analysis process:</p>
+        <ul>
+            <li>Parses command line options for input path and compile commands</li>
+            <li>Calls the Analyzer class to perform code analysis</li>
+            <li>Outputs results in JSON format</li>
+        </ul>
+
+        <h3>Analyzer Class</h3>
+        <p>The <code>Analyzer</code> class (in <code>src/core/analyzer.h/cpp</code>) is the central component:</p>
+        <ul>
+            <li><code>analyze_project()</code>: Analyzes a project directory recursively</li>
+            <li><code>analyze_compile_commands()</code>: Analyzes using compile_commands.json for C++ projects</li>
+        </ul>
+
+        <h3>Parsers</h3>
+        <p>Language-specific parsers handle different code formats:</p>
+
+        <div class="highlight">
+            <strong>C# Parser:</strong>
+            <code>src/parser/csharp_parser.cpp/h</code> - Uses regex-based parsing to extract classes, methods, and variables from C# files.
+        </div>
+
+        <div class="highlight">
+            <strong>C++ Parser:</strong>
+            <code>src/parser/cpp_parser.cpp/h</code> - Implements C++ parsing functionality (not shown in current code but part of the system).</div>
+        </div>
+
+        <div class="highlight">
+            <strong>Python Parser:</strong>
+            <code>src/parser/python_parser.cpp/h</code> - Implements Python parsing functionality (not shown in current code but part of the system).</div>
+        </div>
+
+        <h2>Core Model Structure</h2>
+
+        <p>The model defines how parsed code elements are structured:</p>
+
+        <table>
+            <tr>
+                <th>Element</th>
+                <th>Properties</th>
+                <th>Description</th>
+            </tr>
+            <tr>
+                <td><code>CodeElement</code></td>
+                <td>name, full_namespace, visibility, is_static</td>
+                <td>Base class with common code element properties</td>
+            </tr>
+            <tr>
+                <td><code>Class</code></td>
+                <td>inheritance_list, methods, variables</td>
+                <td>Represents a class with inheritance, methods and variables</td>
+            </tr>
+            <tr>
+                <td><code>Method</code></td>
+                <td>parameters, return_type, called_methods, accessed_variables</td>
+                <td>Represents a method/function with signature information</td>
+            </tr>
+            <tr>
+                <td><code>Variable</code></td>
+                <td>type, mutability</td>
+                <td>Represents a variable with type and access level</td>
+            </tr>
+        </table>
+
+        <h2>Usage Examples</h2>
+
+        <p>To run the analyzer on a project:</p>
+        <pre><code>./CodeAnalyzer /path/to/project</code></pre>
+
+        <p>To analyze with compile_commands.json (for C++ projects):</p>
+        <pre><code>./CodeAnalyzer --compile-commands /path/to/compile_commands.json</code></pre>
+
+        <h2>Test Structure</h2>
+
+        <p>The system includes comprehensive tests in the <code>tests/gtest</code> directory:</p>
+        <ul>
+            <li><code>csharp_test.cpp</code>: Tests for C# parsing functionality</li>
+            <li><code>uml_test.cpp</code>: Tests for UML generation</li>
+            <li><code>main_test.cpp</code>: Tests for main application functionality</li>
+        </ul>
+
+        <h2>UML Generation</h2>
+
+        <p>The system includes a UML generator that can visualize class relationships:</p>
+        <ul>
+            <li>Creates 3D visualizations of class structures</li>
+            <li>Supports inheritance and method relationships</li>
+            <li>Can be extended for different visualization formats</li>
+        </ul>
+
+        <div class="highlight">
+            <strong>Note:</strong> This documentation is generated by the system itself. It describes the current implementation structure and functionality of the code analyzer.
+        </div>
+    </div>
+</body>
+</html>

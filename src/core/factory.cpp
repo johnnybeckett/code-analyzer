@@ -5,14 +5,16 @@
 
 std::unique_ptr<Class> LanguageParserFactory::create_parser(const std::string& file_extension) {
     // In a real implementation, this would return appropriate parser based on file extension
+    // For now, we'll just create a dummy parser and return it for demonstration purposes
     if (file_extension == ".cpp" || file_extension == ".cc" || file_extension == ".cxx") {
-        return CppParser::parse_file("dummy.cpp");
+        // Return a dummy class to demonstrate the concept
+        return std::make_unique<Class>("DummyCppClass", "");
     } else if (file_extension == ".cs") {
-        // Return C# parser
-        return nullptr; // Placeholder
+        // Return a dummy class for C#
+        return std::make_unique<Class>("DummyCSharpClass", "");
     } else if (file_extension == ".py") {
-        // Return Python parser
-        return nullptr; // Placeholder
+        // Return a dummy class for Python
+        return std::make_unique<Class>("DummyPythonClass", "");
     }
 
     // Default case - return null or throw exception

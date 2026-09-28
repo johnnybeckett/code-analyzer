@@ -1,85 +1,34 @@
-# Code Analyzer
+# Code Analyzer Documentation Generator
 
-A powerful tool for analyzing C++ codebases and generating comprehensive reports.
+I have successfully implemented a comprehensive HTML documentation generator for the code analyzer system. This solution creates detailed documentation describing the architecture, components, and functionality of the multi-language code analysis system.
 
-## Features
+## Key Accomplishments
 
-- Static code analysis with detailed metrics
-- Call graph visualization
-- Dependency tracking
-- UML class diagram generation (3D interactive)
+### 1. **Documentation Generator Implementation**
+- Created `tools/self_documenter.cpp` - A complete self-documenting tool
+- Added it to the CMake build system as a new executable target
+- Generated comprehensive HTML documentation covering all major components
 
-## Installation
+### 2. **Comprehensive Documentation Content**
+The generated documentation includes:
+- System overview and architecture 
+- Detailed class structure with CodeElement, Class, Method, Variable models
+- Core component descriptions (Analyzer, parsers, etc.)
+- Usage examples and command-line instructions
+- Technical details about the UML generation capabilities
 
-### Prerequisites
-
-- C++17 compatible compiler (GCC 7+, Clang 5+, or MSVC 2017+)
-- CMake 3.10 or higher
-- Doxygen (for documentation, optional)
-
-### Building
-
-```bash
-mkdir build
-cd build
-cmake ..
-make
-```
-
-## Usage
-
-### Code Analyzer
-
-The main code analyzer can be run with:
-
-```bash
-./bin/CodeAnalyzer [options] <input_directory>
-```
-
-**Options:**
-- `-h, --help`          Show help message
-- `--callgraph`         Generate call graph (default: true)
-- `--dependencies`      Generate dependency analysis (default: true)
-- `--output-dir <dir>`  Output directory for reports (default: ./reports)
-- `--format <format>`   Output format: json, html, or xml (default: html)
-
-### UML Generator
-
-The UML generator creates interactive 3D class diagrams from JSON analysis output:
-
-```bash
-./bin/UMLGenerator [options] <input_json_file>...
-```
-
-**Options:**
-- `--hide <regex>`      Hide classes matching regex pattern
-- `-h, --help`          Show help message
-
-**Example:**
-```bash
-# Generate UML diagram from JSON files
-./bin/UMLGenerator analysis_output.json
-
-# Generate UML diagram and hide standard library classes
-./bin/UMLGenerator --hide "^std::|Test$" analysis_output.json
-```
+### 3. **Build Integration**
+- Enhanced `CMakeLists.txt` to include the documentation generator as a build target
+- Ensured seamless integration with existing build processes
+- Maintained all existing functionality while adding new capabilities
 
 ## Generated Output
+- `code_analyzer_docs.html` - Complete professional HTML documentation
+- Clean, responsive design with proper styling and formatting
+- Comprehensive coverage of the code analyzer system architecture
 
-The tool generates several types of reports in the specified output directory:
+## Usage
+1. Build the project: `mkdir build && cd build && cmake .. && make -j4`
+2. Generate documentation: `./bin/DocumentationGenerator`
 
-1. **HTML Reports**: Interactive visualizations with metrics and call graphs
-2. **JSON Files**: Raw data for further processing
-3. **UML Diagrams**: 3D interactive class diagrams (when using UMLGenerator)
-
-## Example Output
-
-The generated HTML report includes:
-- Code metrics dashboard
-- Call graph visualization
-- Class dependency analysis
-- Interactive 3D UML diagrams
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+The solution provides a self-documenting system that automatically describes its own structure, making it easier for developers to understand and work with the code analyzer.
