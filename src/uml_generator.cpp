@@ -266,7 +266,7 @@ private:
             <option value="light">Light</option>
             <option value="blue">Vim darkblue</option>
         </select>
-        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class, or click its name in the Classes panel, to focus</div>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class</div>
         <div id="stats"></div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
@@ -334,6 +334,8 @@ private:
                 text: ((v.type || '').trim() + ' ' + v.name).trim(),
                 italic: v.mutability === 'read_only',
                 underline: !!v['static'],
+                // Raw type strings, resolved to a class on double-click
+                types: [String(v.type || '').trim()].filter(Boolean),
             };
         }
 
@@ -345,6 +347,8 @@ private:
                 text: m.name + '(' + params + ')' + (ret ? ' : ' + ret : ''),
                 italic: virt,
                 underline: stat,
+                types: [ret, ...(m.parameters || [])]
+                    .map(t => String(t || '').trim()).filter(Boolean),
             };
         }
 
@@ -422,20 +426,27 @@ private:
                 ctx.stroke();
             };
 
+            // Record each member row's vertical band so a double-click can be
+            // mapped back to "which member was hit" and its types resolved
+            const rows = [];
+            const band = (r, top) => {
+                drawMemberRow(ctx, r, top);
+                rows.push({ y0: top, y1: top + ROW_H, types: r.types || [] });
+            };
             let y = NAME_H;
             if (attrs.length || meths.length) separator(y);
             if (attrs.length) {
                 y += COMP_PAD;
-                attrs.forEach(r => { drawMemberRow(ctx, r, y); y += ROW_H; });
+                attrs.forEach(r => { band(r, y); y += ROW_H; });
                 y += COMP_PAD;
             }
             if (meths.length) {
                 separator(y);
                 y += COMP_PAD;
-                meths.forEach(r => { drawMemberRow(ctx, r, y); y += ROW_H; });
+                meths.forEach(r => { band(r, y); y += ROW_H; });
             }
 
-            return { canvas, width, height };
+            return { canvas, width, height, rows };
         }
 
         // --- 3D scene ---
@@ -454,15 +465,28 @@ private:
         scene.add(diagram);
 
         function makeClassBox(cls, abstract, external) {
-            const { canvas, width, height } = buildClassCanvas(cls, abstract, external);
+            const { canvas, width, height, rows } = buildClassCanvas(cls, abstract, external);
             const tex = new THREE.CanvasTexture(canvas);
             tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            // Repeat the UML on the back face (mirrored so it reads correctly
+            // from behind) instead of a blank wall
+            const backCanvas = document.createElement('canvas');
+            backCanvas.width = canvas.width; backCanvas.height = canvas.height;
+            const bctx = backCanvas.getContext('2d');
+            bctx.translate(canvas.width, 0);
+            bctx.scale(-1, 1);
+            bctx.drawImage(canvas, 0, 0);
+            const backTex = new THREE.CanvasTexture(backCanvas);
+            backTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
             const front = new THREE.MeshBasicMaterial({ map: tex });
+            const back = new THREE.MeshBasicMaterial({ map: backTex });
             const side = new THREE.MeshBasicMaterial({ color: 0x24344d });
             const mesh = new THREE.Mesh(
                 new THREE.BoxGeometry(width * WORLD, height * WORLD, 0.3),
-                [side, side, side, side, front, side]);
-            return { mesh, side, w: width * WORLD, h: height * WORLD };
+                [side, side, side, side, front, back]);
+            // ch = canvas height in logical px (pre-supersampling); a hit's
+            // UV y maps into the recorded member-row bands with it
+            return { mesh, side, w: width * WORLD, h: height * WORLD, rows, ch: height };
         }
 
         // --- Model: nodes (classes + unresolved base classes) and edges ---
@@ -502,6 +526,7 @@ private:
             const cls = n.cls || { name: n.name, methods: [], variables: [] };
             const box = makeClassBox(cls, !n.external && isAbstract(n.cls), n.external);
             n.w = box.w; n.h = box.h;
+            n.rows = box.rows; n.ch = box.ch;
             n.mesh = box.mesh;
             n.sideMat = box.side;
         }
@@ -599,7 +624,7 @@ private:
             return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
         }
 
-        const NS_PAD = 3;        // clearance between a group's boxes and its frame
+        const NS_PAD = 4;        // clearance between a group's boxes and its frame
         const NS_LABEL = 2;     // label strip along the frame's top edge
         const NS_CELL_X = 22;   // clearance between adjacent frames
         const NS_CELL_Y = 26;
@@ -709,27 +734,71 @@ private:
             diagram.add(grid);
         }
 
-        // --- Namespace frames: a labelled, lightly-filled panel behind each group ---
-        function makePanelCanvas(label, w, h) {
-            const px = 1 / WORLD;
-            const W = Math.max(64, Math.ceil(w * px));
-            const H = Math.max(64, Math.ceil(h * px));
-            const canvas = document.createElement('canvas');
-            canvas.width = W; canvas.height = H;
-            const ctx = canvas.getContext('2d');
+        // --- Namespace frames: a solid slab behind each group, with the
+        //     group name on a plate that stays legible from every angle ---
+        const PANEL_DEPTH = 1.6;   // slab thickness (world units)
+        const PANEL_Z = -0.3;      // front face, just behind the class boxes
+
+        // Fill + border only; the label lives on the billboard plate below
+        function makeSlabCanvas() {
+            const c = document.createElement('canvas');
+            c.width = 64; c.height = 64;
+            const ctx = c.getContext('2d');
             const t = cur3d.panel;
             ctx.fillStyle = t.fill;
-            ctx.fillRect(0, 0, W, H);
-            ctx.fillStyle = t.strip;
-            ctx.fillRect(0, 0, W, 42);
+            ctx.fillRect(0, 0, 64, 64);
             ctx.strokeStyle = t.border;
-            ctx.lineWidth = 3;
-            ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+            ctx.lineWidth = 5;
+            ctx.strokeRect(2.5, 2.5, 59, 59);
+            return c;
+        }
+
+        // The group name as a billboard: it always faces the camera, so the
+        // frame is identifiable whether it is viewed from the front, from
+        // above or from below
+        function makeLabelSprite(label, maxW) {
+            const font = 'bold 30px Arial, Helvetica, sans-serif';
+            const probe = document.createElement('canvas').getContext('2d');
+            probe.font = font;
+            const pad = 20, h = 54;
+            const w = Math.ceil(probe.measureText(label).width + pad * 2);
+            const scale = 2;
+            const canvas = document.createElement('canvas');
+            canvas.width = w * scale; canvas.height = h * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
+            const t = cur3d.panel;
+            const r = h / 2;
+            ctx.beginPath();
+            ctx.moveTo(r, 0);
+            ctx.arcTo(w, 0, w, h, r);
+            ctx.arcTo(w, h, 0, h, r);
+            ctx.arcTo(0, h, 0, 0, r);
+            ctx.arcTo(0, 0, w, 0, r);
+            ctx.closePath();
+            ctx.fillStyle = t.strip;
+            ctx.fill();
+            ctx.strokeStyle = t.border;
+            ctx.lineWidth = 2;
+            ctx.stroke();
             ctx.fillStyle = t.text;
-            ctx.font = 'bold 26px Arial, Helvetica, sans-serif';
+            ctx.font = font;
+            ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(label, 12, 21);
-            return canvas;
+            ctx.fillText(label, w / 2, h / 2 + 1);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            const sprite = new THREE.Sprite(
+                new THREE.SpriteMaterial({ map: tex, transparent: true }));
+            const hWorld = 1.1;
+            let wWorld = hWorld * (w / h);
+            if (maxW && wWorld > maxW) {   // long names shrink to fit the frame
+                const s = maxW / wWorld;
+                wWorld = maxW;
+                hWorld *= s;
+            }
+            sprite.scale.set(wWorld, hWorld, 1);
+            return sprite;
         }
 
         let panels = [];
@@ -739,18 +808,25 @@ private:
                 p.mesh.geometry.dispose();
                 if (p.mesh.material.map) p.mesh.material.map.dispose();
                 p.mesh.material.dispose();
+                diagram.remove(p.label);
+                if (p.label.material.map) p.label.material.map.dispose();
+                p.label.material.dispose();
             }
             panels = [];
             if (!currentGroups.length || !cur3d) return;
             for (const g of currentGroups) {
-                const tex = new THREE.CanvasTexture(makePanelCanvas(g.label, g.w, g.h));
+                const tex = new THREE.CanvasTexture(makeSlabCanvas());
                 tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
                 const mesh = new THREE.Mesh(
-                    new THREE.BoxGeometry(g.w, g.h, 0.05),
+                    new THREE.BoxGeometry(g.w, g.h, PANEL_DEPTH),
                     new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
-                mesh.position.set(g.x, g.y, -0.3);   // just behind the class boxes
+                mesh.position.set(g.x, g.y, PANEL_Z - PANEL_DEPTH / 2);
                 diagram.add(mesh);
-                panels.push({ mesh, names: g.names });
+                const label = makeLabelSprite(g.label, g.w * 0.95);
+                label.position.set(g.x, g.y + g.h / 2 + 0.75,
+                                   PANEL_Z - PANEL_DEPTH / 2);
+                diagram.add(label);
+                panels.push({ mesh, label, names: g.names });
             }
         }
 
@@ -850,8 +926,18 @@ private:
             view.dist = clamp(view.dist * (1 + e.deltaY * 0.001), MIN_DIST, MAX_DIST);
         }, { passive: false });
 
-        // Double-click a class to point the camera at it
+        // Double-click a class to point the camera at it; a double-click on
+        // a member row jumps to the class named by that member's type
+        // (e.g. a "Mutability" field flies to the Mutability class)
         const ray = new THREE.Raycaster();
+        const TYPE_JUNK = /^(void|bool|char|short|int|long|float|double|auto|unsigned|signed|const|static|virtual|mutable|string|size_t|wchar_t|std)$/;
+        function classInType(t) {
+            const ids = String(t || '').match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+            for (const id of ids) {
+                if (!TYPE_JUNK.test(id) && nodes.has(id)) return id;
+            }
+            return null;
+        }
         container.addEventListener('dblclick', e => {
             const rect = container.getBoundingClientRect();
             const mouse = new THREE.Vector2(
@@ -861,6 +947,17 @@ private:
             const hits = ray.intersectObjects([...nodes.values()].map(n => n.mesh));
             if (!hits.length) return;
             const n = [...nodes.values()].find(nd => nd.mesh === hits[0].object);
+            const hit = hits[0];
+            if (hit.uv && n.rows && n.ch) {
+                const py = (1 - hit.uv.y) * n.ch;
+                const row = n.rows.find(r => py >= r.y0 && py < r.y1);
+                if (row) {
+                    for (const t of row.types) {
+                        const target = classInType(t);
+                        if (target) { focusOn(nodes.get(target)); return; }
+                    }
+                }
+            }
             focusOn(n);
         });
 
@@ -1047,10 +1144,12 @@ private:
             });
             // A namespace frame stays while any class inside it is shown
             panels.forEach(p => {
-                p.mesh.visible = p.names.some(name => {
+                const show = p.names.some(name => {
                     const n = nodes.get(name);
                     return n && !n.external && n.mesh.visible;
                 });
+                p.mesh.visible = show;
+                p.label.visible = show;
             });
             document.querySelectorAll('.classCard').forEach(card => {
                 card.style.display = (!re || re.test(card.dataset.name)) ? '' : 'none';
