@@ -42,9 +42,12 @@ AnalysisResult Analyzer::analyze_project(const std::string& project_path) {
             std::cout << "Processing file: " << file_path << std::endl;
 
             // Check for different source file types and parse accordingly
-            // (C++ classes are usually declared in headers, so parse those too)
+            // (C++ classes are usually declared in headers, so parse those
+            //  too; .tpp/.tcc hold out-of-line template definitions and
+            //  sometimes whole template class bodies)
             if (extension == ".cpp" || extension == ".cc" || extension == ".cxx" || extension == ".c"
-                || extension == ".h" || extension == ".hpp" || extension == ".hxx") {
+                || extension == ".h" || extension == ".hpp" || extension == ".hxx"
+                || extension == ".hh" || extension == ".tpp" || extension == ".tcc") {
                 // Parse the file using the C++ parser (may yield several classes)
                 for (auto& parsed_class : CppParser::parse_file(file_path)) {
                     result.add_class(std::move(parsed_class));

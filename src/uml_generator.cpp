@@ -550,12 +550,34 @@ private:
             return nodes.get(name);
         }
 
+        // Resolve a base-class name to the analyzed class it refers to, so
+        // inheritance edges link real class boxes instead of dashed stubs.
+        // Handles bare names (`Test`) and qualified names (`testing::Test`) by
+        // matching the fully-qualified `namespace::name` form. Returns the
+        // class, or null when the base is external (e.g. `std::enable_...`).
+        function resolveBase(b) {
+            if (byName.has(b)) return byName.get(b);
+            if (b.includes('::')) {
+                for (const c of classes) {
+                    if ((c.namespace || '') + '::' + c.name === b) return c;
+                }
+            }
+            return null;
+        }
+
         const edges = [];
         for (const c of classes) {
             const n = getNode(c.name);
             const bases = [...new Set(c.inheritance || [])];
-            if (bases.length) n.parent = bases[0]; // primary base drives layout
-            bases.forEach(b => { getNode(b); edges.push({ from: n.name, to: b }); });
+            // Map each base to the node it should link to: the resolved class
+            // (a real box) when it's in the analysis, otherwise an external
+            // stub named after the base.
+            const targets = bases.map(b => {
+                const resolved = resolveBase(b);
+                return resolved ? resolved.name : b;
+            });
+            if (targets.length) n.parent = targets[0]; // primary base drives layout
+            targets.forEach(t => { getNode(t); edges.push({ from: n.name, to: t }); });
         }
 
         const children = new Map();

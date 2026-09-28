@@ -91,6 +91,34 @@ std::vector<std::string> split_parameters(const std::string& params) {
 }
 
 /**
+ * @brief Reduce a base-clause item to a canonical base-class name
+ *
+ * Strips the leading access specifier (public/protected/private) plus any
+ * `virtual` / `struct` keywords, and removes a leading `::` so that
+ * `::testing::Test` and `testing::Test` are treated as the same base.
+ * Template-argument bases (e.g. `std::enable_shared_from_this<T>`) are kept
+ * intact — only the access keywords in front of the type are dropped.
+ */
+std::string extract_base_name(const std::string& raw) {
+    std::string base = trim(raw);
+    static const std::set<std::string> leading_keywords = {
+        "public", "protected", "private", "virtual", "struct"
+    };
+    for (;;) {
+        std::istringstream ws(base);
+        std::string first;
+        if (!(ws >> first) || !leading_keywords.count(first)) break;
+        std::string rest;
+        std::getline(ws, rest);
+        base = trim(rest);
+    }
+    if (base.size() >= 2 && base[0] == ':' && base[1] == ':') {
+        base.erase(0, 2);
+    }
+    return base;
+}
+
+/**
  * @brief Split a qualified namespace name (`a::b::c`) into its segments
  */
 std::vector<std::string> split_qualified_name(const std::string& qualified) {
@@ -340,8 +368,14 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
     // innermost namespace enclosing its declaration
     const std::vector<NamespaceRange> namespaces = collect_namespaces(content);
 
-    // Match every `class Name [: base, base, ...] {` declaration in the file
-    const std::regex class_regex(R"(class\s+(\w+)(?:\s*:\s*([\w:\s,]+?))?\s*\{)");
+    // Match every `class Name { ... }` declaration in the file, whether or
+    // not it is a template specialization (`class Foo<int> {`) and whether or
+    // not it has a base clause. The base clause may itself contain template
+    // arguments (`class X : public std::enable_shared_from_this<X<T>> {`), so
+    // both the optional `<...>` after the name and the base list are matched
+    // with "anything but a brace or semicolon" rather than a fixed char set.
+    const std::regex class_regex(
+        R"(class\s+(\w+)(?:\s*<[^{};]*?>)?(?:\s*:\s*([^{};]+?))?\s*\{)");
 
     for (auto it = std::sregex_iterator(content.cbegin(), content.cend(), class_regex);
          it != std::sregex_iterator(); ++it) {
@@ -351,14 +385,14 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
 
         auto parsed_class = std::make_unique<Class>(class_name, namespace_path);
 
-        // Extract base classes (last identifier of each comma-separated item)
+        // Extract base classes from the base clause, normalising each to a
+        // canonical name (access specifiers and a leading `::` are dropped,
+        // so `::testing::Test` and `testing::Test` are identical)
         if (match[2].matched) {
-            for (const auto& base : split_parameters(match[2])) {
-                std::istringstream bs(base);
-                std::string tok, last;
-                while (bs >> tok) last = tok;
-                if (!last.empty() && !syntax_keywords().count(last)) {
-                    parsed_class->add_inheritance(last);
+            for (const auto& raw_base : split_parameters(match[2])) {
+                std::string base = extract_base_name(raw_base);
+                if (!base.empty()) {
+                    parsed_class->add_inheritance(base);
                 }
             }
         }

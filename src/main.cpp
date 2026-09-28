@@ -91,9 +91,18 @@ boost::json::value to_json(const AnalysisResult& result, const std::string& inpu
 void print_usage(const std::string& program_name) {
     std::cout << "Usage: " << program_name << " [options] <input_path>\n";
     std::cout << "Options:\n";
-    std::cout << "  --compile-commands <path>   Specify path to compile_commands.json\n";
+    std::cout << "  --compile-commands <path>   Analyze only the files listed in\n";
+    std::cout << "                              compile_commands.json (the .cpp translation\n";
+    std::cout << "                              units). Does NOT follow #include'd headers\n";
+    std::cout << "                              or .tpp template files.\n";
     std::cout << "  --json <file>               Write analysis results to a JSON file\n";
     std::cout << "  -h, --help                  Show this help message\n";
+    std::cout << "\n";
+    std::cout << "Recommended: pass a project DIRECTORY as <input_path>. This walks the\n";
+    std::cout << "whole tree and parses every C++ source and header it finds (.cpp, .h,\n";
+    std::cout << ".hpp, .hh, .tpp, .tcc, ...), so classes declared in headers and\n";
+    std::cout << "template definitions in .tpp files are included. Use\n";
+    std::cout << "--compile-commands only when you specifically want the compile database.\n";
     std::cout << "\n";
     std::cout << "Examples:\n";
     std::cout << "  " << program_name << " /path/to/project\n";

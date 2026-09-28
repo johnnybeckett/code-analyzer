@@ -3,7 +3,10 @@ add_executable(code_analyzer_tests
     gtest/main_test.cpp
     gtest/uml_test.cpp
     gtest/csharp_test.cpp
+    ../src/parser/cpp_parser.cpp
     ../src/parser/csharp_parser.cpp
+    ../src/parser/python_parser.cpp
+    ../src/core/analyzer.cpp
     ../src/core/model.cpp
 )
 
@@ -11,6 +14,7 @@ add_executable(code_analyzer_tests
 target_link_libraries(code_analyzer_tests
     GTest::gtest
     GTest::gtest_main
+    Boost::json
 )
 
 # Add test
