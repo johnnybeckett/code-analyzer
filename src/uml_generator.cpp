@@ -238,12 +238,59 @@ private:
         .badge.static { background: #7c3aed; color: #fff; }
         .badge.vis { background: var(--badge-vis-bg); color: var(--badge-vis-fg); }
         .none { color: var(--faint); font-size: 12px; }
+        /* Sidebar tree: one collapsible node per namespace */
+        .nsHeader {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            user-select: none;
+        }
+        .nsHeader .caret { color: var(--muted); font-size: 11px; width: 12px; }
+        .nsHeader .count {
+            margin-left: auto;
+            color: var(--muted);
+            font-weight: normal;
+            font-size: 11px;
+        }
+        .nsChildren {
+            margin-left: 9px;
+            border-left: 1px solid var(--border);
+            padding-left: 11px;
+        }
+        /* Controls panel: minimize to a compact header bar */
+        #controlsHead {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #controlsHead h3 { margin: 0; }
+        #controls #minimizeBtn { padding: 2px 9px; margin: 0 0 0 8px; font-size: 13px; }
+        #controls.minimized { width: auto; padding: 0; border: 0; background: transparent; }
+        #controls.minimized #controlsBody { display: none; }
+        #controls.minimized #controlsHead {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px;
+        }
     </style>
 </head>
 <body>
     <div id="scene"></div>
     <div id="controls">
-        <h3>UML Class Diagram</h3>
+        <div id="controlsHead">
+            <h3>UML Class Diagram</h3>
+            <button id="minimizeBtn" class="secondary" title="Minimize panel">&ndash;</button>
+        </div>
+        <div id="controlsBody">
         <div class="legend">
             <div><span class="tri"></span>&nbsp; generalization (extends)</div>
             <div><span class="sym">+</span> public &middot; <span class="sym">-</span> private &middot; <span class="sym">#</span> protected</div>
@@ -266,8 +313,9 @@ private:
             <option value="light">Light</option>
             <option value="blue">Vim darkblue</option>
         </select>
-        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class</div>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class &middot; click a class name in the sidebar to focus</div>
         <div id="stats"></div>
+        </div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
 
@@ -468,22 +516,14 @@ private:
             const { canvas, width, height, rows } = buildClassCanvas(cls, abstract, external);
             const tex = new THREE.CanvasTexture(canvas);
             tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-            // Repeat the UML on the back face (mirrored so it reads correctly
-            // from behind) instead of a blank wall
-            const backCanvas = document.createElement('canvas');
-            backCanvas.width = canvas.width; backCanvas.height = canvas.height;
-            const bctx = backCanvas.getContext('2d');
-            bctx.translate(canvas.width, 0);
-            bctx.scale(-1, 1);
-            bctx.drawImage(canvas, 0, 0);
-            const backTex = new THREE.CanvasTexture(backCanvas);
-            backTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-            const front = new THREE.MeshBasicMaterial({ map: tex });
-            const back = new THREE.MeshBasicMaterial({ map: backTex });
+            // A BoxGeometry's front and back faces both present a texture
+            // upright and unmirrored when viewed from the outside, so the
+            // very same UML texture reads correctly on both sides
+            const face = new THREE.MeshBasicMaterial({ map: tex });
             const side = new THREE.MeshBasicMaterial({ color: 0x24344d });
             const mesh = new THREE.Mesh(
                 new THREE.BoxGeometry(width * WORLD, height * WORLD, 0.3),
-                [side, side, side, side, front, back]);
+                [side, side, side, side, face, face]);
             // ch = canvas height in logical px (pre-supersampling); a hit's
             // UV y maps into the recorded member-row bands with it
             return { mesh, side, w: width * WORLD, h: height * WORLD, rows, ch: height };
@@ -615,17 +655,16 @@ private:
 
         // Namespace: classes are grouped by namespace, falling back to the
         // source-file directory; each group sits in its own labelled frame.
-        function groupKey(n) {
-            const c = n.cls;
-            if (!c) return '';
+        function classGroupKey(c) {
             const ns = String(c.namespace || '').trim();
             if (ns) return ns;
             const parts = String(c.file || '').trim().split('/').filter(Boolean);
             return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
         }
+        const groupKey = n => (n.cls ? classGroupKey(n.cls) : '');
+        const groupLabel = key => key || '(global)';
 
         const NS_PAD = 4;        // clearance between a group's boxes and its frame
-        const NS_LABEL = 2;     // label strip along the frame's top edge
         const NS_CELL_X = 22;   // clearance between adjacent frames
         const NS_CELL_Y = 26;
 
@@ -657,7 +696,7 @@ private:
             const cols = Math.max(1, Math.round(Math.sqrt(laid.length)));
             const rows = Math.ceil(laid.length / cols);
             const cellW = Math.max(...laid.map(g => g.maxX - g.minX)) + NS_PAD * 2 + NS_CELL_X;
-            const cellH = Math.max(...laid.map(g => g.maxY - g.minY)) + NS_PAD * 2 + NS_LABEL + NS_CELL_Y;
+            const cellH = Math.max(...laid.map(g => g.maxY - g.minY)) + NS_PAD * 2 + NS_CELL_Y;
             laid.forEach((g, i) => {
                 const col = i % cols, row = Math.floor(i / cols);
                 const ox = (col - (cols - 1) / 2) * cellW;
@@ -667,13 +706,13 @@ private:
                 g.minX += ox - gx; g.maxX += ox - gx;
                 g.minY += oy - gy; g.maxY += oy - gy;
                 g.x = (g.minX + g.maxX) / 2;
-                g.y = (g.minY + g.maxY) / 2 + NS_LABEL / 2;
+                g.y = (g.minY + g.maxY) / 2;
                 g.w = g.maxX - g.minX + NS_PAD * 2;
-                g.h = g.maxY - g.minY + NS_PAD * 2 + NS_LABEL;
+                g.h = g.maxY - g.minY + NS_PAD * 2;
             });
 
             currentGroups = laid.map(g => ({
-                label: g.key || '(global)',
+                label: groupLabel(g.key),
                 x: g.x, y: g.y, w: g.w, h: g.h,
                 names: g.members.map(n => n.name),
             }));
@@ -734,13 +773,16 @@ private:
             diagram.add(grid);
         }
 
-        // --- Namespace frames: a solid slab behind each group, with the
-        //     group name on a plate that stays legible from every angle ---
-        const PANEL_DEPTH = 1.6;   // slab thickness (world units)
-        const PANEL_Z = -0.3;      // front face, just behind the class boxes
+        // --- Namespace frames: a wide slab behind each group. The group
+        //     name is printed large on the slab's top and bottom faces so it
+        //     is legible when the diagram is zoomed out and viewed from
+        //     above or from below; the side faces keep a normal-width edge ---
+        const PANEL_DEPTH = 4;    // slab thickness (world units)
+        const PANEL_Z = -0.3;     // front face, just behind the class boxes
+        const PANEL_PX = 16;      // canvas pixels per world unit
 
-        // Fill + border only; the label lives on the billboard plate below
-        function makeSlabCanvas() {
+        // Fill + a normal-width border for the slab's four side faces
+        function makeSideCanvas() {
             const c = document.createElement('canvas');
             c.width = 64; c.height = 64;
             const ctx = c.getContext('2d');
@@ -748,57 +790,43 @@ private:
             ctx.fillStyle = t.fill;
             ctx.fillRect(0, 0, 64, 64);
             ctx.strokeStyle = t.border;
-            ctx.lineWidth = 5;
-            ctx.strokeRect(2.5, 2.5, 59, 59);
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, 62, 62);
             return c;
         }
 
-        // The group name as a billboard: it always faces the camera, so the
-        // frame is identifiable whether it is viewed from the front, from
-        // above or from below
-        function makeLabelSprite(label, maxW) {
-            const font = 'bold 30px Arial, Helvetica, sans-serif';
-            const probe = document.createElement('canvas').getContext('2d');
-            probe.font = font;
-            const pad = 20, h = 54;
-            const w = Math.ceil(probe.measureText(label).width + pad * 2);
-            const scale = 2;
+        // The group name printed across the slab's top/bottom faces in a
+        // large font (shrinking to fit narrow frames). A BoxGeometry's +Y
+        // and -Y faces both present the canvas left edge to world -X and,
+        // from the natural above/below view, present the canvas top toward
+        // the top of the screen, so the name reads correctly from either
+        // side with no mirroring
+        function makeNameCanvas(label, widthWorld) {
+            const w = Math.max(96, Math.ceil(widthWorld * PANEL_PX));
+            const h = Math.max(64, Math.ceil(PANEL_DEPTH * PANEL_PX));
+            const scale = 2;   // supersample for crispness
             const canvas = document.createElement('canvas');
             canvas.width = w * scale; canvas.height = h * scale;
             const ctx = canvas.getContext('2d');
             ctx.scale(scale, scale);
             const t = cur3d.panel;
-            const r = h / 2;
-            ctx.beginPath();
-            ctx.moveTo(r, 0);
-            ctx.arcTo(w, 0, w, h, r);
-            ctx.arcTo(w, h, 0, h, r);
-            ctx.arcTo(0, h, 0, 0, r);
-            ctx.arcTo(0, 0, w, 0, r);
-            ctx.closePath();
-            ctx.fillStyle = t.strip;
-            ctx.fill();
+            ctx.fillStyle = t.fill;
+            ctx.fillRect(0, 0, w, h);
             ctx.strokeStyle = t.border;
             ctx.lineWidth = 2;
-            ctx.stroke();
+            ctx.strokeRect(1, 1, w - 2, h - 2);
+            let fs = Math.floor(h * 0.62);
+            ctx.font = 'bold ' + fs + 'px Arial, Helvetica, sans-serif';
+            const maxW = w - 24;
+            while (fs > 12 && ctx.measureText(label).width > maxW) {
+                fs -= 2;
+                ctx.font = 'bold ' + fs + 'px Arial, Helvetica, sans-serif';
+            }
             ctx.fillStyle = t.text;
-            ctx.font = font;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(label, w / 2, h / 2 + 1);
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-            const sprite = new THREE.Sprite(
-                new THREE.SpriteMaterial({ map: tex, transparent: true }));
-            const hWorld = 1.1;
-            let wWorld = hWorld * (w / h);
-            if (maxW && wWorld > maxW) {   // long names shrink to fit the frame
-                const s = maxW / wWorld;
-                wWorld = maxW;
-                hWorld *= s;
-            }
-            sprite.scale.set(wWorld, hWorld, 1);
-            return sprite;
+            return canvas;
         }
 
         let panels = [];
@@ -806,27 +834,26 @@ private:
             for (const p of panels) {
                 diagram.remove(p.mesh);
                 p.mesh.geometry.dispose();
-                if (p.mesh.material.map) p.mesh.material.map.dispose();
-                p.mesh.material.dispose();
-                diagram.remove(p.label);
-                if (p.label.material.map) p.label.material.map.dispose();
-                p.label.material.dispose();
+                for (const m of p.mesh.material) {
+                    if (m.map) m.map.dispose();
+                    m.dispose();
+                }
             }
             panels = [];
             if (!currentGroups.length || !cur3d) return;
             for (const g of currentGroups) {
-                const tex = new THREE.CanvasTexture(makeSlabCanvas());
-                tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                const nameTex = new THREE.CanvasTexture(makeNameCanvas(g.label, g.w));
+                nameTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                const sideTex = new THREE.CanvasTexture(makeSideCanvas());
+                sideTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                const nameMat = new THREE.MeshBasicMaterial({ map: nameTex, transparent: true });
+                const sideMat = new THREE.MeshBasicMaterial({ map: sideTex, transparent: true });
                 const mesh = new THREE.Mesh(
                     new THREE.BoxGeometry(g.w, g.h, PANEL_DEPTH),
-                    new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+                    [sideMat, sideMat, nameMat, nameMat, sideMat, sideMat]);
                 mesh.position.set(g.x, g.y, PANEL_Z - PANEL_DEPTH / 2);
                 diagram.add(mesh);
-                const label = makeLabelSprite(g.label, g.w * 0.95);
-                label.position.set(g.x, g.y + g.h / 2 + 0.75,
-                                   PANEL_Z - PANEL_DEPTH / 2);
-                diagram.add(label);
-                panels.push({ mesh, label, names: g.names });
+                panels.push({ mesh, names: g.names });
             }
         }
 
@@ -1072,52 +1099,91 @@ private:
             return html;
         }
 
+        function makeClassCard(c) {
+            const card = document.createElement('div');
+            card.className = 'classCard';
+            card.dataset.name = c.name;
+            const node = nodes.get(c.name);
+            card.addEventListener('mouseenter', () => setHighlight(node, true));
+            card.addEventListener('mouseleave', () => setHighlight(node, false));
+
+            let html = '<h3>' + esc(c.name) + '</h3>';
+            const bases = c.inheritance || [];
+            if (bases.length) html += '<div class="bases">«extends» ' + bases.map(esc).join(', ') + '</div>';
+
+            const methods = c.methods || [];
+            const variables = c.variables || [];
+            if (methods.length) {
+                html += '<h4>Methods (' + methods.length + ')</h4><ul>'
+                    + methods.map(m => '<li>' + signature(m) + '</li>').join('')
+                    + '</ul>';
+            }
+            if (variables.length) {
+                html += '<h4>Members (' + variables.length + ')</h4><ul>'
+                    + variables.map(v =>
+                        '<li><span class="ret">' + esc((v.type || '').trim())
+                        + '</span> <span class="nm">' + esc(v.name) + '</span></li>'
+                    ).join('')
+                    + '</ul>';
+            }
+            if (!methods.length && !variables.length) {
+                html += '<div class="none">no members detected</div>';
+            }
+            card.innerHTML = html;
+            // Clicking the class name flies the camera to that box
+            const title = card.querySelector('h3');
+            title.style.cursor = 'pointer';
+            title.title = 'Click to focus the camera on this class';
+            title.addEventListener('click', () => focusOn(node));
+            return card;
+        }
+
+        // The classes list is a tree: one collapsible node per namespace
+        // (falling back to the source directory, as in the 3D frames) with
+        // its class cards nested underneath
         function buildSidebar() {
             const sidebar = document.getElementById('sidebar');
-            classes.forEach(c => {
-                const card = document.createElement('div');
-                card.className = 'classCard';
-                card.dataset.name = c.name;
-                const node = nodes.get(c.name);
-                card.addEventListener('mouseenter', () => setHighlight(node, true));
-                card.addEventListener('mouseleave', () => setHighlight(node, false));
-
-                let html = '<h3>' + esc(c.name) + '</h3>';
-                const bases = c.inheritance || [];
-                if (bases.length) html += '<div class="bases">«extends» ' + bases.map(esc).join(', ') + '</div>';
-
-                const methods = c.methods || [];
-                const variables = c.variables || [];
-                if (methods.length) {
-                    html += '<h4>Methods (' + methods.length + ')</h4><ul>'
-                        + methods.map(m => '<li>' + signature(m) + '</li>').join('')
-                        + '</ul>';
-                }
-                if (variables.length) {
-                    html += '<h4>Members (' + variables.length + ')</h4><ul>'
-                        + variables.map(v =>
-                            '<li><span class="ret">' + esc((v.type || '').trim())
-                            + '</span> <span class="nm">' + esc(v.name) + '</span></li>'
-                        ).join('')
-                        + '</ul>';
-                }
-                if (!methods.length && !variables.length) {
-                    html += '<div class="none">no members detected</div>';
-                }
-                card.innerHTML = html;
-                // Clicking the class name flies the camera to that box
-                const title = card.querySelector('h3');
-                title.style.cursor = 'pointer';
-                title.title = 'Click to focus the camera on this class';
-                title.addEventListener('click', () => focusOn(node));
-                sidebar.appendChild(card);
-            });
+            const groups = new Map();
+            for (const c of classes) {
+                const key = classGroupKey(c);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(c);
+            }
+            const keys = [...groups.keys()].sort((a, b) =>
+                (a === '' ? -1 : 0) - (b === '' ? -1 : 0) || a.localeCompare(b));
+            for (const key of keys) {
+                const list = groups.get(key);
+                const group = document.createElement('div');
+                group.className = 'nsGroup';
+                const header = document.createElement('div');
+                header.className = 'nsHeader';
+                header.innerHTML = '<span class="caret">&#9662;</span>'
+                    + '<span class="nsName">' + esc(groupLabel(key)) + '</span>'
+                    + '<span class="count">' + list.length + '</span>';
+                const children = document.createElement('div');
+                children.className = 'nsChildren';
+                for (const c of list) children.appendChild(makeClassCard(c));
+                // Clicking the namespace header collapses / expands its classes
+                header.addEventListener('click', () => {
+                    const collapsed = children.style.display === 'none';
+                    children.style.display = collapsed ? '' : 'none';
+                    header.querySelector('.caret').innerHTML
+                        = collapsed ? '&#9662;' : '&#9656;';
+                });
+                group.appendChild(header);
+                group.appendChild(children);
+                sidebar.appendChild(group);
+            }
             updateStats();
         }
 
         function updateStats() {
             const cards = [...document.querySelectorAll('.classCard')];
-            const shown = cards.filter(c => c.style.display !== 'none').length;
+            const shown = cards.filter(c => {
+                if (c.style.display === 'none') return false;
+                const group = c.closest('.nsChildren');
+                return !(group && group.style.display === 'none');
+            }).length;
             document.getElementById('stats').textContent
                 = shown + ' of ' + classes.length + ' classes shown';
         }
@@ -1149,10 +1215,15 @@ private:
                     return n && !n.external && n.mesh.visible;
                 });
                 p.mesh.visible = show;
-                p.label.visible = show;
             });
             document.querySelectorAll('.classCard').forEach(card => {
                 card.style.display = (!re || re.test(card.dataset.name)) ? '' : 'none';
+            });
+            // Hide a namespace group whose classes are all filtered out
+            document.querySelectorAll('.nsGroup').forEach(g => {
+                const anyShown = [...g.querySelectorAll('.classCard')]
+                    .some(card => card.style.display !== 'none');
+                g.style.display = anyShown ? '' : 'none';
             });
             updateStats();
         }
@@ -1187,6 +1258,15 @@ private:
         const layoutSelect = document.getElementById('layoutSelect');
         layoutSelect.addEventListener('change', () => applyLayout(layoutSelect.value));
         applyLayout('linear');
+
+        // Minimize the controls panel to a compact bar, and back again
+        const controls = document.getElementById('controls');
+        const minimizeBtn = document.getElementById('minimizeBtn');
+        minimizeBtn.addEventListener('click', () => {
+            const minimized = controls.classList.toggle('minimized');
+            minimizeBtn.innerHTML = minimized ? '+' : '&ndash;';
+            minimizeBtn.title = minimized ? 'Expand panel' : 'Minimize panel';
+        });
     </script>
 </body>
 </html>)HTMLDOC";
