@@ -328,12 +328,15 @@ private:
             ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch]));
 
         // The analyzer may emit several records per class (e.g. one per source
-        // file); merge same-named records into a single class.
+        // file); merge same-named records into a single class. Key on
+        // namespace + name so same-named classes in different namespaces
+        // stay distinct.
         function mergeClasses(list) {
             const map = new Map();
             for (const c of list) {
-                if (!map.has(c.name)) {
-                    map.set(c.name, {
+                const key = (c.namespace || '') + '::' + c.name;
+                if (!map.has(key)) {
+                    map.set(key, {
                         name: c.name,
                         namespace: c.namespace || '',
                         file: c.file || '',
@@ -342,7 +345,7 @@ private:
                         vars: new Map(),
                     });
                 }
-                const m = map.get(c.name);
+                const m = map.get(key);
                 if (c.file) m.file = c.file;
                 (c.inheritance || []).forEach(b => m.bases.add(b));
                 (c.methods || []).forEach(mt =>

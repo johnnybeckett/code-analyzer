@@ -91,6 +91,80 @@ std::vector<std::string> split_parameters(const std::string& params) {
 }
 
 /**
+ * @brief Split a qualified namespace name (`a::b::c`) into its segments
+ */
+std::vector<std::string> split_qualified_name(const std::string& qualified) {
+    std::vector<std::string> parts;
+    std::string current;
+    for (size_t i = 0; i < qualified.size(); ++i) {
+        if (qualified[i] == ':' && i + 1 < qualified.size() && qualified[i + 1] == ':') {
+            parts.push_back(current);
+            current.clear();
+            ++i;
+        } else {
+            current.push_back(qualified[i]);
+        }
+    }
+    parts.push_back(current);
+    return parts;
+}
+
+/**
+ * @brief A namespace declaration's extent and name segments
+ */
+struct NamespaceRange {
+    size_t start;                  // offset of the `namespace` keyword
+    size_t end;                    // offset just past the matching '}'
+    std::vector<std::string> segments;
+};
+
+/**
+ * @brief Collect the extents of every namespace declaration in the file
+ *
+ * Handles both the C++17 qualified form (`namespace a::b::c { ... }`) and
+ * the nested form (`namespace a { namespace b { ... } }`); anonymous
+ * namespaces contribute no name but their extent is still recorded.
+ * @return Ranges in document order (outermost first, since an outer
+ *         namespace always begins before its nested ones)
+ */
+std::vector<NamespaceRange> collect_namespaces(const std::string& content) {
+    std::vector<NamespaceRange> ranges;
+    const std::regex namespace_re(
+        R"(namespace\s*([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*)?\s*\{)");
+    for (auto it = std::sregex_iterator(content.cbegin(), content.cend(), namespace_re);
+         it != std::sregex_iterator(); ++it) {
+        size_t open_pos = it->position(0) + it->length(0) - 1;  // index of '{'
+        size_t close_pos = find_matching_brace(content, open_pos);
+        if (close_pos == std::string::npos) continue;           // unbalanced braces
+
+        NamespaceRange range{static_cast<size_t>(it->position(0)), close_pos, {}};
+        if (it->size() > 1 && (*it)[1].matched) {
+            range.segments = split_qualified_name(it->str(1));
+        }
+        ranges.push_back(std::move(range));
+    }
+    return ranges;
+}
+
+/**
+ * @brief Compute the full namespace path enclosing the given position
+ * @param pos Character offset of a declaration (e.g. a class)
+ * @return Namespace segments from outermost to innermost, joined by `::`
+ */
+std::string namespace_at(const std::vector<NamespaceRange>& namespaces, size_t pos) {
+    std::string path;
+    for (const auto& ns : namespaces) {
+        if (ns.start <= pos && pos < ns.end) {
+            for (const auto& seg : ns.segments) {
+                if (!path.empty()) path += "::";
+                path += seg;
+            }
+        }
+    }
+    return path;
+}
+
+/**
  * @brief Heuristically extract methods and member variables from a class body
  *
  * Only statements at the top level of the body are considered: brace and
@@ -262,6 +336,10 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
 
     content = strip_comments(content);
 
+    // Record namespace extents once so each class can be attributed to the
+    // innermost namespace enclosing its declaration
+    const std::vector<NamespaceRange> namespaces = collect_namespaces(content);
+
     // Match every `class Name [: base, base, ...] {` declaration in the file
     const std::regex class_regex(R"(class\s+(\w+)(?:\s*:\s*([\w:\s,]+?))?\s*\{)");
 
@@ -269,8 +347,9 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
          it != std::sregex_iterator(); ++it) {
         const std::smatch& match = *it;
         std::string class_name = match[1];
+        std::string namespace_path = namespace_at(namespaces, match.position(0));
 
-        auto parsed_class = std::make_unique<Class>(class_name, "");
+        auto parsed_class = std::make_unique<Class>(class_name, namespace_path);
 
         // Extract base classes (last identifier of each comma-separated item)
         if (match[2].matched) {
@@ -292,7 +371,9 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
             extract_members(*parsed_class, body);
         }
 
-        std::cout << "Found C++ class: " << class_name << std::endl;
+        std::cout << "Found C++ class: "
+                  << (namespace_path.empty() ? class_name : namespace_path + "::" + class_name)
+                  << std::endl;
         classes.push_back(std::move(parsed_class));
     }
 
