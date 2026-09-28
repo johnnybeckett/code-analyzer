@@ -78,10 +78,62 @@ private:
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         * { box-sizing: border-box; }
+        /* Colour schemes: the default (dark) values live on :root and the
+           other themes override them. The 3D scene follows suit via THEMES3D
+           in the script below. */
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --border: #334155;
+            --border-strong: #475569;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --faint: #64748b;
+            --accent: #4285F4;
+            --btn2: #475569;
+            --card-name: #93c5fd;
+            --ret: #7dd3fc;
+            --nm: #fbbf24;
+            --badge-vis-bg: #334155;
+            --badge-vis-fg: #cbd5e1;
+        }
+        body[data-theme="light"] {
+            --bg: #eef2f7;
+            --panel: #ffffff;
+            --border: #cbd5e1;
+            --border-strong: #94a3b8;
+            --text: #0f172a;
+            --muted: #64748b;
+            --faint: #94a3b8;
+            --accent: #2563eb;
+            --btn2: #94a3b8;
+            --card-name: #1d4ed8;
+            --ret: #0e7490;
+            --nm: #b45309;
+            --badge-vis-bg: #cbd5e1;
+            --badge-vis-fg: #0f172a;
+        }
+        /* Vim "darkblue": Blue2 background, gray85 text, LightSkyBlue accents */
+        body[data-theme="blue"] {
+            --bg: #000094;
+            --panel: #0000b8;
+            --border: #3d3dd6;
+            --border-strong: #6262ff;
+            --text: #d9d9d9;
+            --muted: #87cefa;
+            --faint: #7489e8;
+            --accent: #4a6cf7;
+            --btn2: #3b3bd0;
+            --card-name: #87cefa;
+            --ret: #87cefa;
+            --nm: #ffd97d;
+            --badge-vis-bg: #2c2cc0;
+            --badge-vis-fg: #c9d4ff;
+        }
         body {
             margin: 0;
-            background: #0f172a;
-            color: #e2e8f0;
+            background: var(--bg);
+            color: var(--text);
             font-family: Arial, Helvetica, sans-serif;
         }
         #scene {
@@ -94,76 +146,76 @@ private:
             top: 0; right: 0; bottom: 0;
             width: 380px;
             overflow-y: auto;
-            background: #1e293b;
-            border-left: 1px solid #334155;
+            background: var(--panel);
+            border-left: 1px solid var(--border);
             padding: 16px;
         }
         #sidebar h2 { margin: 0 0 12px; font-size: 16px; }
         #controls {
             position: absolute;
             top: 12px; left: 12px;
-            background: rgba(15, 23, 42, 0.88);
-            border: 1px solid #334155;
+            background: var(--panel);
+            border: 1px solid var(--border);
             padding: 12px;
             border-radius: 8px;
             z-index: 10;
             width: 268px;
         }
         #controls h3 { margin: 0 0 4px; font-size: 14px; }
-        #controls input {
+        #controls input, #controls select {
             width: 100%;
             padding: 6px 8px;
             margin: 6px 0;
             border-radius: 6px;
-            border: 1px solid #475569;
-            background: #0f172a;
-            color: #e2e8f0;
+            border: 1px solid var(--border-strong);
+            background: var(--bg);
+            color: var(--text);
         }
         #controls button {
             padding: 6px 12px;
             margin-right: 6px;
             border: 0;
             border-radius: 6px;
-            background: #4285F4;
+            background: var(--accent);
             color: #fff;
             cursor: pointer;
         }
-        #controls button.secondary { background: #475569; }
-        .legend { font-size: 11px; color: #94a3b8; margin: 6px 0 10px; line-height: 1.9; }
+        #controls button.secondary { background: var(--btn2); }
+        .legend { font-size: 11px; color: var(--muted); margin: 6px 0 10px; line-height: 1.9; }
         .legend .sym {
             display: inline-block;
-            border: 1px solid #475569;
+            border: 1px solid var(--border-strong);
             border-radius: 3px;
             padding: 0 5px;
-            color: #e2e8f0;
+            color: var(--text);
             font-size: 10px;
             line-height: 1.5;
         }
         .legend .tri {
             width: 0; height: 0;
             border: 5px solid transparent;
-            border-bottom: 8px solid #94a3b8;
+            border-bottom: 8px solid var(--muted);
             display: inline-block;
         }
         .legend .u { text-decoration: underline; }
         .legend .i { font-style: italic; }
-        #hint { font-size: 11px; color: #64748b; margin-top: 8px; }
-        #stats { margin-top: 6px; font-size: 12px; color: #94a3b8; }
+        #hint { font-size: 11px; color: var(--faint); margin-top: 8px; }
+        #stats { margin-top: 6px; font-size: 12px; color: var(--muted); }
         .classCard {
-            background: #0f172a;
-            border: 1px solid #334155;
+            background: var(--bg);
+            border: 1px solid var(--border);
             border-radius: 8px;
             padding: 12px;
             margin-bottom: 12px;
         }
-        .classCard h3 { margin: 0 0 4px; font-size: 15px; color: #93c5fd; }
-        .classCard .bases { font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+        .classCard h3 { margin: 0 0 4px; font-size: 15px; color: var(--card-name); }
+        .classCard .bases { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
         .classCard h4 {
             margin: 10px 0 4px;
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            color: #64748b;
+            color: var(--faint);
         }
         .classCard ul {
             margin: 0;
@@ -172,9 +224,9 @@ private:
             font-size: 12px;
         }
         .classCard li { margin: 3px 0; }
-        .classCard .ret { color: #7dd3fc; }
-        .classCard .nm { color: #fbbf24; }
-        .classCard .params { color: #94a3b8; }
+        .classCard .ret { color: var(--ret); }
+        .classCard .nm { color: var(--nm); }
+        .classCard .params { color: var(--muted); }
         .badge {
             display: inline-block;
             font-size: 10px;
@@ -184,8 +236,8 @@ private:
             vertical-align: middle;
         }
         .badge.static { background: #7c3aed; color: #fff; }
-        .badge.vis { background: #334155; color: #cbd5e1; }
-        .none { color: #64748b; font-size: 12px; }
+        .badge.vis { background: var(--badge-vis-bg); color: var(--badge-vis-fg); }
+        .none { color: var(--faint); font-size: 12px; }
     </style>
 </head>
 <body>
@@ -203,7 +255,13 @@ private:
         <button onclick="applyFilter()">Apply Filter</button>
         <button class="secondary" onclick="resetFilter()">Reset</button>
         <button class="secondary" onclick="resetView()">Reset View</button>
-        <div id="hint">drag: rotate &middot; wheel: zoom &middot; double-click a class to focus</div>
+        <h3>Colour scheme</h3>
+        <select id="themeSelect">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="blue">Blue (vim darkblue)</option>
+        </select>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus</div>
         <div id="stats"></div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
@@ -487,6 +545,8 @@ private:
 
         // --- Generalization arrows: stem + hollow triangle at the superclass ---
         const TRI = 0.9, TRIW = 0.4;
+        // One shared material so the theme switch can re-tint all arrows
+        const edgeMat = new THREE.LineBasicMaterial({ color: 0xcbd5e1 });
         function makeEdge(n1, n2) {
             const start = new THREE.Vector3(n1.x, n1.y + n1.h / 2, n1.z);
             const tip = new THREE.Vector3(n2.x, n2.y - n2.h / 2, n2.z);
@@ -501,7 +561,7 @@ private:
             const b2 = base.clone().sub(perp.clone().multiplyScalar(TRIW));
             const geo = new THREE.BufferGeometry().setFromPoints(
                 [start, base, tip, b1, b1, b2, b2, tip]);
-            return new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xcbd5e1 }));
+            return new THREE.Line(geo, edgeMat);
         }
 
         const edgeObjs = edges
@@ -511,44 +571,100 @@ private:
 
         for (const n of nodes.values()) diagram.add(n.mesh);
 
-        // Faint floor grid as a depth cue
+        // Faint floor grid as a depth cue (rebuilt when the theme changes)
         const span = Math.max(...nodes.values().map(n => Math.hypot(n.x, n.y, n.z) + Math.max(n.w, n.h)));
-        const grid = new THREE.GridHelper(span * 2.5, 40, 0x273449, 0x1b2536);
-        grid.position.y = Math.min(...nodes.values().map(n => n.y - n.h / 2)) - 3;
-        diagram.add(grid);
+        const gridY = Math.min(...nodes.values().map(n => n.y - n.h / 2)) - 3;
+        let grid = null;
+        function buildGrid(c1, c2) {
+            if (grid) {
+                diagram.remove(grid);
+                grid.geometry.dispose();
+                grid.material.dispose();
+            }
+            grid = new THREE.GridHelper(span * 2.5, 40, c1, c2);
+            grid.position.y = gridY;
+            diagram.add(grid);
+        }
+        buildGrid(0x273449, 0x1b2536);
 
         // --- Camera and interaction ---
+        // Orbit camera: the diagram stays put and the camera orbits a target
+        // point. yaw/pitch rotate around it, dist zooms along the view axis,
+        // and panning slides the target in the camera plane.
+        const FOV = 50 * Math.PI / 180;
         const initDist = span * 1.15 + 10;
+        const MIN_DIST = 4, MAX_DIST = initDist * 3;
         const camera = new THREE.PerspectiveCamera(
             50, container.clientWidth / container.clientHeight, 0.1, 5000);
-        camera.position.set(0, 0, initDist);
+
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+        const view = { yaw: 0, pitch: 0, dist: initDist,
+                       target: { x: 0, y: 0, z: 0 } };
+
+        function worldPerPixel() {
+            return (2 * view.dist * Math.tan(FOV / 2)) / container.clientHeight;
+        }
+
+        function updateCamera() {
+            const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+            const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw);
+            camera.position.set(
+                view.target.x + view.dist * cp * sy,
+                view.target.y + view.dist * sp,
+                view.target.z + view.dist * cp * cy);
+            camera.lookAt(view.target.x, view.target.y, view.target.z);
+        }
+        updateCamera();
 
         let autoRotate = true;
         let dragging = false, lastX = 0, lastY = 0;
-        const focus = { active: false, rotX: 0, rotY: 0, dist: initDist };
+        // The "home" view: centred, head-on, initial zoom — the destination
+        // of both the initial setup and "Reset View"
+        function homeView() {
+            return { yaw: 0, pitch: 0, dist: initDist, tx: 0, ty: 0, tz: 0 };
+        }
+        const focus = { active: false, ...homeView() };
 
         container.addEventListener('mousedown', e => {
+            if (e.button !== 0) return;  // left button only (others may context-menu)
             autoRotate = false;
+            focus.active = false;
             dragging = true;
             lastX = e.clientX; lastY = e.clientY;
-            focus.active = false;
         });
         window.addEventListener('mouseup', () => { dragging = false; });
         window.addEventListener('mousemove', e => {
             if (!dragging) return;
-            diagram.rotation.y += (e.clientX - lastX) * 0.005;
-            diagram.rotation.x = Math.max(-1.2, Math.min(1.2,
-                diagram.rotation.x + (e.clientY - lastY) * 0.005));
+            const dx = e.clientX - lastX, dy = e.clientY - lastY;
             lastX = e.clientX; lastY = e.clientY;
+            const fine = e.altKey ? 0.25 : 1;   // Alt = fine adjustments
+
+            if (e.shiftKey) {
+                // Pan the look-at target in the camera plane (x / y)
+                const s = worldPerPixel() * fine;
+                const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+                const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw);
+                const rx = cy,      ry = 0,    rz = -sy;         // camera right
+                const ux = -sp * sy, uy = cp, uz = -sp * cy;     // camera up
+                view.target.x += (-dx * rx + dy * ux) * s;
+                view.target.y += (-dx * ry + dy * uy) * s;
+                view.target.z += (-dx * rz + dy * uz) * s;
+            } else if (e.ctrlKey) {
+                // Zoom in / out along the view axis (z)
+                view.dist = clamp(view.dist * (1 + dy * 0.002 * fine),
+                                  MIN_DIST, MAX_DIST);
+            } else {
+                view.yaw += dx * 0.005 * fine;
+                view.pitch = clamp(view.pitch + dy * 0.005 * fine, -1.4, 1.4);
+            }
         });
         container.addEventListener('wheel', e => {
             e.preventDefault();
             focus.active = false;
-            camera.position.z = Math.max(5, Math.min(initDist * 3,
-                camera.position.z * (1 + e.deltaY * 0.001)));
+            view.dist = clamp(view.dist * (1 + e.deltaY * 0.001), MIN_DIST, MAX_DIST);
         }, { passive: false });
 
-        // Double-click a class to rotate and zoom onto it
+        // Double-click a class to point the camera at it
         const ray = new THREE.Raycaster();
         container.addEventListener('dblclick', e => {
             const rect = container.getBoundingClientRect();
@@ -562,40 +678,88 @@ private:
             focusOn(n);
         });
 
+        // Bring yaw onto [-pi, pi] so the focus animation takes the short way
+        function wrapYaw() {
+            view.yaw = ((view.yaw + Math.PI) % (2 * Math.PI) + 2 * Math.PI)
+                       % (2 * Math.PI) - Math.PI;
+        }
+
         function focusOn(n) {
             autoRotate = false;
-            focus.rotY = Math.atan2(n.x, n.z);
-            focus.rotX = Math.atan2(n.y, Math.hypot(n.x, n.z));
-            focus.dist = Math.max(6, Math.max(n.w, n.h) * 3.5);
+            wrapYaw();
+            // Head-on view: the class front faces the camera, centered
+            focus.yaw = 0;
+            focus.pitch = 0;
+            focus.dist = Math.max(8, Math.max(n.w, n.h) * 3);
+            focus.tx = n.x; focus.ty = n.y; focus.tz = n.z;
             focus.active = true;
         }
 
         function resetView() {
-            focus.rotX = 0; focus.rotY = 0; focus.dist = initDist; focus.active = true;
+            wrapYaw();
+            Object.assign(focus, homeView());
+            focus.active = true;
+        }
+
+        // --- Colour themes ---
+        // The HTML chrome is themed through the CSS variables set on
+        // body[data-theme]; the 3D scene needs its palette applied here.
+        // The class boxes stay white in every theme — their dark outline
+        // keeps them legible against any background.
+        const THEMES3D = {
+            dark:  { bg: 0x0f172a, side: 0x24344d, highlight: 0x4285F4,
+                     grid: [0x273449, 0x1b2536], edge: 0xcbd5e1 },
+            light: { bg: 0xe2e8f0, side: 0xc7d2e0, highlight: 0x2563eb,
+                     grid: [0xbcc7d6, 0xd8e0ea], edge: 0x475569 },
+            blue:  { bg: 0x0000a8, side: 0x2b2b9e, highlight: 0x6d8cff,
+                     grid: [0x2f2fae, 0x1a1a70], edge: 0x9db8ff },
+        };
+        let cur3d = THEMES3D.dark;
+
+        function applyTheme(name) {
+            if (!THEMES3D[name]) name = 'dark';
+            cur3d = THEMES3D[name];
+            document.body.dataset.theme = name;
+            scene.background.set(cur3d.bg);
+            edgeMat.color.set(cur3d.edge);
+            buildGrid(cur3d.grid[0], cur3d.grid[1]);
+            // Re-tint the box sides, keeping whichever are highlighted now
+            for (const n of nodes.values()) {
+                n.sideMat.color.set(n.mesh.scale.x !== 1 ? cur3d.highlight
+                                                         : cur3d.side);
+            }
+            try { localStorage.setItem('umlTheme', name); } catch (err) {}
         }
 
         // Hover a sidebar card to highlight the box
         function setHighlight(n, on) {
             if (!n) return;
-            n.sideMat.color.set(on ? 0x4285F4 : 0x24344d);
+            n.sideMat.color.set(on ? cur3d.highlight : cur3d.side);
             const s = on ? 1.06 : 1.0;
             n.mesh.scale.set(s, s, s);
         }
 
         (function animate() {
             requestAnimationFrame(animate);
-            if (autoRotate) diagram.rotation.y += 0.002;
+            if (autoRotate) view.yaw += 0.002;
             if (focus.active) {
                 const k = 0.08;
-                diagram.rotation.y += (focus.rotY - diagram.rotation.y) * k;
-                diagram.rotation.x += (focus.rotX - diagram.rotation.x) * k;
-                camera.position.z += (focus.dist - camera.position.z) * k;
-                if (Math.abs(focus.rotY - diagram.rotation.y) < 0.002
-                    && Math.abs(focus.rotX - diagram.rotation.x) < 0.002
-                    && Math.abs(focus.dist - camera.position.z) < 0.05) {
+                view.yaw += (focus.yaw - view.yaw) * k;
+                view.pitch += (focus.pitch - view.pitch) * k;
+                view.dist += (focus.dist - view.dist) * k;
+                view.target.x += (focus.tx - view.target.x) * k;
+                view.target.y += (focus.ty - view.target.y) * k;
+                view.target.z += (focus.tz - view.target.z) * k;
+                if (Math.abs(focus.yaw - view.yaw) < 0.002
+                    && Math.abs(focus.pitch - view.pitch) < 0.002
+                    && Math.abs(focus.dist - view.dist) < 0.05
+                    && Math.hypot(focus.tx - view.target.x,
+                                focus.ty - view.target.y,
+                                focus.tz - view.target.z) < 0.05) {
                     focus.active = false;
                 }
             }
+            updateCamera();
             renderer.render(scene, camera);
         })();
 
@@ -701,6 +865,16 @@ private:
         }
 
         buildSidebar();
+
+        // Restore the saved colour scheme (falling back to dark) and wire
+        // up the selector
+        const themeSelect = document.getElementById('themeSelect');
+        let savedTheme = 'dark';
+        try { savedTheme = localStorage.getItem('umlTheme') || 'dark'; }
+        catch (err) {}
+        themeSelect.value = THEMES3D[savedTheme] ? savedTheme : 'dark';
+        themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
+        applyTheme(themeSelect.value);
     </script>
 </body>
 </html>)HTMLDOC";
