@@ -1,5 +1,5 @@
 #include "core/analyzer.h"
-#include <json/json.h>
+#include <boost/json.hpp>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -29,59 +29,60 @@ const char* mutability_name(Mutability m) {
 }
 
 /**
- * @brief Serialize an AnalysisResult to a Json::Value
+ * @brief Serialize an AnalysisResult to a boost::json::value
  */
-Json::Value to_json(const AnalysisResult& result, const std::string& input_path) {
-    Json::Value root;
+boost::json::value to_json(const AnalysisResult& result, const std::string& input_path) {
+    namespace json = boost::json;
+    json::object root;
     root["generator"] = "CodeAnalyzer";
     root["project_path"] = input_path;
-    root["class_count"] = static_cast<Json::UInt>(result.classes.size());
+    root["class_count"] = result.classes.size();
 
-    Json::Value classes(Json::arrayValue);
+    json::array classes;
     for (const auto& class_obj : result.classes) {
-        Json::Value cj;
+        json::object cj;
         cj["name"] = class_obj->name;
         cj["namespace"] = class_obj->full_namespace;
         cj["visibility"] = visibility_name(class_obj->visibility);
         cj["static"] = class_obj->is_static;
 
-        Json::Value inheritance(Json::arrayValue);
+        json::array inheritance;
         for (const auto& base : class_obj->inheritance_list) {
-            inheritance.append(base);
+            inheritance.emplace_back(base);
         }
-        cj["inheritance"] = inheritance;
+        cj["inheritance"] = std::move(inheritance);
 
-        Json::Value methods(Json::arrayValue);
+        json::array methods;
         for (const auto& method : class_obj->methods) {
-            Json::Value mj;
+            json::object mj;
             mj["name"] = method->name;
             mj["return_type"] = method->return_type;
             mj["visibility"] = visibility_name(method->visibility);
             mj["static"] = method->is_static;
-            Json::Value params(Json::arrayValue);
+            json::array params;
             for (const auto& param : method->parameters) {
-                params.append(param);
+                params.emplace_back(param);
             }
-            mj["parameters"] = params;
-            methods.append(mj);
+            mj["parameters"] = std::move(params);
+            methods.emplace_back(std::move(mj));
         }
-        cj["methods"] = methods;
+        cj["methods"] = std::move(methods);
 
-        Json::Value variables(Json::arrayValue);
+        json::array variables;
         for (const auto& variable : class_obj->variables) {
-            Json::Value vj;
+            json::object vj;
             vj["name"] = variable->name;
             vj["type"] = variable->type;
             vj["mutability"] = mutability_name(variable->mutability);
             vj["visibility"] = visibility_name(variable->visibility);
-            variables.append(vj);
+            variables.emplace_back(std::move(vj));
         }
-        cj["variables"] = variables;
+        cj["variables"] = std::move(variables);
 
-        classes.append(cj);
+        classes.emplace_back(std::move(cj));
     }
-    root["classes"] = classes;
-    return root;
+    root["classes"] = std::move(classes);
+    return json::value(std::move(root));
 }
 
 /**
@@ -147,8 +148,7 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: could not open " << json_output << " for writing\n";
                 return 1;
             }
-            Json::StyledWriter writer;
-            out << writer.write(to_json(result, input_path));
+            out << boost::json::serialize(to_json(result, input_path));
             out.close();
             std::cout << "JSON written to: " << json_output << "\n";
         }

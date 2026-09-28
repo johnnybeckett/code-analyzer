@@ -4,7 +4,8 @@
 #include <vector>
 #include <regex>
 #include <sstream>
-#include <json/json.h> // Assuming we have JSON library for parsing
+#include <iterator>
+#include <boost/json.hpp>
 
 /**
  * @brief UML Class Diagram Generator
@@ -1288,9 +1289,7 @@ private:
      */
     std::vector<std::string> parseInputFiles() {
         std::vector<std::string> class_data;
-
-        Json::StreamWriterBuilder writer;
-        writer["indentation"] = "";
+        namespace json = boost::json;
 
         for (const auto& filename : input_files) {
             std::ifstream file(filename);
@@ -1299,23 +1298,22 @@ private:
                 continue;
             }
 
-            Json::CharReaderBuilder reader_builder;
-            Json::Value root;
-            std::string errors;
-            if (!Json::parseFromStream(reader_builder, file, &root, &errors)) {
-                std::cerr << "Warning: failed to parse " << filename << ": " << errors << std::endl;
+            boost::system::error_code ec;
+            json::value root = json::parse(file, ec);
+            if (ec) {
+                std::cerr << "Warning: failed to parse " << filename << ": " << ec.message() << std::endl;
                 continue;
             }
 
-            const Json::Value& classes = root["classes"];
-            if (!classes.isArray()) {
+            if (!root.is_object() || !root.as_object().contains("classes")
+                || !root.as_object().at("classes").is_array()) {
                 std::cerr << "Warning: no 'classes' array in " << filename << std::endl;
                 continue;
             }
 
             // Serialize each class object so the browser receives the real data
-            for (const auto& cls : classes) {
-                class_data.push_back(Json::writeString(writer, cls));
+            for (const auto& cls : root.as_object().at("classes").as_array()) {
+                class_data.push_back(json::serialize(cls));
             }
         }
 

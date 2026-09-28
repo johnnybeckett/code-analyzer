@@ -7,7 +7,8 @@
 #include <cctype>
 #include <filesystem>
 #include <set>
-#include <json/json.h>
+#include <iterator>
+#include <boost/json.hpp>
 
 namespace {
 
@@ -307,17 +308,24 @@ AnalysisResult CppParser::parse_compile_commands(const std::string& compile_comm
         return result;
     }
 
-    Json::Value root;
-    Json::CharReaderBuilder reader_builder;
-    std::string errors;
-    if (!Json::parseFromStream(reader_builder, file, &root, &errors)) {
-        std::cerr << "Error parsing compile_commands.json: " << errors << std::endl;
+    boost::system::error_code ec;
+    boost::json::value root = boost::json::parse(file, ec);
+    if (ec) {
+        std::cerr << "Error parsing compile_commands.json: " << ec.message() << std::endl;
+        return result;
+    }
+    if (!root.is_array()) {
+        std::cerr << "Error: compile_commands.json is not a JSON array" << std::endl;
         return result;
     }
 
     // Parse each source file listed in the compilation database
-    for (const auto& entry : root) {
-        std::string file_path = entry.get("file", "").asString();
+    for (const auto& entry : root.as_array()) {
+        std::string file_path;
+        if (entry.is_object() && entry.as_object().contains("file")
+            && entry.as_object().at("file").is_string()) {
+            file_path = entry.as_object().at("file").as_string();
+        }
         if (file_path.empty()) continue;
 
         std::cout << "Processing compile command for: " << file_path << std::endl;
