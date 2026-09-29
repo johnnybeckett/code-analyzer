@@ -307,7 +307,25 @@ private:
         <select id="layoutSelect">
             <option value="linear">Linear (hierarchy)</option>
             <option value="namespace">Grouped by namespace</option>
+            <option value="circular">Circular</option>
         </select>
+        <div id="nsLevelWrap" style="display:none">
+            <h3>Namespace level</h3>
+            <select id="nsLevelSelect">
+                <option value="1" selected>Level 1 (top namespace)</option>
+                <option value="2">Level 2</option>
+                <option value="3">Level 3</option>
+                <option value="4">Level 4</option>
+                <option value="5">Level 5</option>
+                <option value="6">Level 6</option>
+                <option value="7">Level 7</option>
+                <option value="8">Level 8</option>
+                <option value="9">Level 9</option>
+                <option value="10">Level 10</option>
+                <option value="11">Level 11</option>
+                <option value="12">Level 12 (full namespace)</option>
+            </select>
+        </div>
         <h3>Colour scheme</h3>
         <select id="themeSelect">
             <option value="dark">Dark</option>
@@ -339,6 +357,7 @@ private:
                     map.set(key, {
                         name: c.name,
                         namespace: c.namespace || '',
+                        kind: c.kind || 'class',
                         file: c.file || '',
                         bases: new Set(),
                         methods: new Map(),
@@ -355,6 +374,7 @@ private:
             return [...map.values()].map(m => ({
                 name: m.name,
                 namespace: m.namespace,
+                kind: m.kind || 'class',
                 file: m.file,
                 inheritance: [...m.bases],
                 methods: [...m.methods.values()],
@@ -409,6 +429,13 @@ private:
         const NAME = 'bold 17px Arial, Helvetica, sans-serif';
         const PAD = 14, NAME_H = 40, ROW_H = 24, COMP_PAD = 10;
 
+        // The kind (class / struct / union) is shown as a prefix in the
+        // name compartment; plain names for the default "class" kind
+        const displayName = c => {
+            const k = c && c.kind;
+            return (k && k !== 'class' ? k + ' ' : '') + (c ? c.name : '');
+        };
+
         function drawMemberRow(ctx, row, y) {
             const base = y + ROW_H / 2;
             ctx.font = (row.italic ? 'italic ' : '') + TEXT;
@@ -436,7 +463,7 @@ private:
 
             const probe = document.createElement('canvas').getContext('2d');
             probe.font = NAME;
-            let width = Math.max(140, probe.measureText(cls.name).width);
+            let width = Math.max(140, probe.measureText(displayName(cls)).width);
             probe.font = TEXT;
             attrs.concat(meths).forEach(r => {
                 width = Math.max(width, probe.measureText(r.glyph + '  ' + r.text).width);
@@ -467,7 +494,7 @@ private:
             ctx.font = (abstract ? 'italic ' : '') + NAME;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(cls.name, width / 2, NAME_H / 2);
+            ctx.fillText(displayName(cls), width / 2, NAME_H / 2);
 
             const separator = y => {
                 ctx.strokeStyle = '#94a3b8';
@@ -681,13 +708,23 @@ private:
 
         // Namespace: classes are grouped by namespace, falling back to the
         // source-file directory; each group sits in its own labelled frame.
-        function classGroupKey(c) {
+        // Group key: the first `level` "::"-separated segments of the
+        // namespace (levels 1..12 from the selector; Infinity keeps the
+        // full namespace, as the sidebar tree does). Namespaces with fewer
+        // segments keep all of them. Empty namespace falls back to the
+        // source-file directory (or '' => "(global)").
+        function classGroupKey(c, level = Infinity) {
             const ns = String(c.namespace || '').trim();
-            if (ns) return ns;
+            if (ns) {
+                const segs = ns.split('::').filter(Boolean);
+                if (segs.length) return segs.slice(0, level).join('::');
+                return ns;
+            }
             const parts = String(c.file || '').trim().split('/').filter(Boolean);
             return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
         }
-        const groupKey = n => (n.cls ? classGroupKey(n.cls) : '');
+        let nsLevel = 1;
+        const groupKey = n => (n.cls ? classGroupKey(n.cls, nsLevel) : '');
         const groupLabel = key => key || '(global)';
 
         const NS_PAD = 4;        // clearance between a group's boxes and its frame
@@ -742,6 +779,78 @@ private:
                 x: g.x, y: g.y, w: g.w, h: g.h,
                 names: g.members.map(n => n.name),
             }));
+        }
+
+        // Circular: namespace groups occupy angular sectors around the
+        // origin in the x-y plane (z = 0 for every node); within a sector,
+        // members sit on concentric rings by inheritance depth (roots
+        // innermost). One group or all-global data degrade to a single full
+        // 2*PI sector, so the same code path covers every case.
+        function layoutCircular() {
+            const groups = new Map();
+            for (const n of nodes.values()) {
+                const key = groupKey(n);
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(n);
+            }
+            const keys = [...groups.keys()].sort((a, b) =>
+                (a === '') - (b === '') || a.localeCompare(b));
+            const maxW = Math.max(10, ...nodes.values().map(n => n.w));
+            const GAP = 3;
+            const RING_GAP = maxW + GAP * 2;
+            const R0 = maxW + GAP * 2;
+            const TWO_PI = Math.PI * 2;
+            const sector = TWO_PI / Math.max(1, keys.length);
+            keys.forEach((key, gi) => {
+                const members = groups.get(key);
+                const inner = new Set(members.map(n => n.name));
+                // Inheritance depth within this sector (roots = 0)
+                const depthOf = n => {
+                    let d = 0, cur = n, guard = 0;
+                    while (cur.parent && inner.has(cur.parent) && guard++ < 1000) {
+                        d++; cur = nodes.get(cur.parent);
+                    }
+                    return d;
+                };
+                const byDepth = new Map();
+                for (const n of members) {
+                    const d = depthOf(n);
+                    if (!byDepth.has(d)) byDepth.set(d, []);
+                    byDepth.get(d).push(n);
+                }
+                const start = -Math.PI / 2 + gi * sector;
+                // Innermost first, so rings sharing angles (same member
+                // count place their boxes at identical odd-multiple slots)
+                // can be pushed strictly apart ring by ring.
+                const depths = [...byDepth.keys()].sort((a, b) => a - b);
+                const ringRadius = new Map();   // ring length -> largest radius used
+                for (const d of depths) {
+                    const ring = byDepth.get(d);
+                    const slot = sector / ring.length;
+                    // Radius large enough that the chord between adjacent
+                    // boxes is >= maxW + 2*GAP; clamp sin so a tiny slot
+                    // can't blow up the radius. A singleton ring has no
+                    // in-ring neighbours, so it only needs clearance from
+                    // the adjacent sector — and a lone group (full 2*PI
+                    // sector) has no neighbours at all, so no lower bound.
+                    let need = 0;
+                    if (ring.length > 1) {
+                        need = (maxW / 2 + GAP) / Math.max(0.2, Math.sin(slot / 2));
+                    } else if (keys.length > 1) {
+                        need = (maxW / 2 + GAP) / Math.max(0.2, Math.sin(sector / 2));
+                    }
+                    let r = Math.max(R0 + d * RING_GAP, need);
+                    const prev = ringRadius.get(ring.length);
+                    if (prev !== undefined) r = Math.max(r, prev + RING_GAP);
+                    ringRadius.set(ring.length, r);
+                    ring.forEach((n, i) => {
+                        const a = start + (i + 0.5) * slot;
+                        n.x = r * Math.cos(a);
+                        n.y = r * Math.sin(a);
+                        n.z = 0;
+                    });
+                }
+            });
         }
 
         // --- Generalization arrows: stem + hollow triangle at the superclass ---
@@ -887,6 +996,7 @@ private:
         // namespace frames and the grid to match
         function applyLayout(mode) {
             if (mode === 'namespace') layoutNamespaces();
+            else if (mode === 'circular') { currentGroups = []; layoutCircular(); }
             else { currentGroups = []; layoutLinear(); }
             for (const n of nodes.values()) n.mesh.position.set(n.x, n.y, n.z);
             rebuildEdges();
@@ -1133,7 +1243,7 @@ private:
             card.addEventListener('mouseenter', () => setHighlight(node, true));
             card.addEventListener('mouseleave', () => setHighlight(node, false));
 
-            let html = '<h3>' + esc(c.name) + '</h3>';
+            let html = '<h3>' + esc(displayName(c)) + '</h3>';
             const bases = c.inheritance || [];
             if (bases.length) html += '<div class="bases">«extends» ' + bases.map(esc).join(', ') + '</div>';
 
@@ -1282,8 +1392,20 @@ private:
 
         // Layout: linear (the original arrangement) by default
         const layoutSelect = document.getElementById('layoutSelect');
-        layoutSelect.addEventListener('change', () => applyLayout(layoutSelect.value));
-        applyLayout('linear');
+        const nsLevelSelect = document.getElementById('nsLevelSelect');
+        const nsLevelWrap = document.getElementById('nsLevelWrap');
+        nsLevelSelect.addEventListener('change', () => {
+            const v = parseInt(nsLevelSelect.value, 10);
+            nsLevel = Math.max(1, Math.min(12, isNaN(v) ? 1 : v));
+            nsLevelSelect.value = nsLevel;
+            if (layoutSelect.value === 'namespace') applyLayout('namespace');
+        });
+        layoutSelect.addEventListener('change', () => {
+            // The namespace-level selector only makes sense in namespace mode
+            nsLevelWrap.style.display = (layoutSelect.value === 'namespace') ? '' : 'none';
+            applyLayout(layoutSelect.value);
+        });
+        applyLayout(layoutSelect.value);
 
         // Minimize the controls panel to a compact bar, and back again
         const controls = document.getElementById('controls');

@@ -49,6 +49,11 @@ public:
  */
 class Class : public CodeElement {
 public:
+    /**
+     * @brief Declaration kind: "class", "struct", or "union"
+     *        (defaults to "class")
+     */
+    std::string kind = "class";
     std::vector<std::string> inheritance_list;
     std::vector<std::unique_ptr<Method>> methods;
     std::vector<std::unique_ptr<Variable>> variables;

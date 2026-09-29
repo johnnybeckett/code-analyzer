@@ -6,6 +6,65 @@
 #include <sstream>
 #include <filesystem>
 
+namespace {
+
+/**
+ * @brief Find the index just past the '}' matching the '{' at open_pos
+ * @return npos if braces are unbalanced
+ */
+size_t find_matching_brace(const std::string& content, size_t open_pos) {
+    int depth = 0;
+    for (size_t i = open_pos; i < content.size(); ++i) {
+        if (content[i] == '{') ++depth;
+        else if (content[i] == '}') {
+            --depth;
+            if (depth == 0) return i + 1;
+        }
+    }
+    return std::string::npos;
+}
+
+/**
+ * @brief Compute the full namespace path enclosing the given position
+ *
+ * Handles both the block form (`namespace A.B { ... }`) and nested
+ * declarations (`namespace A { namespace B { ... } }`). C# uses dot
+ * separators (`A.B`), which are converted to the `::` form used
+ * everywhere else in the model so namespace grouping stays uniform.
+ * @param pos Character offset of a type declaration
+ * @return Namespace segments from outermost to innermost, joined by `::`
+ */
+std::string namespace_at(const std::string& content, size_t pos) {
+    std::string path;
+    const std::regex namespace_re(
+        R"(\bnamespace\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\{)");
+    for (auto it = std::sregex_iterator(content.cbegin(), content.cend(), namespace_re);
+         it != std::sregex_iterator(); ++it) {
+        size_t open_pos = it->position(0) + it->length(0) - 1;  // index of '{'
+        size_t close_pos = find_matching_brace(content, open_pos);
+        if (close_pos == std::string::npos) continue;           // unbalanced braces
+        if (it->position(0) > pos || pos >= close_pos) continue;
+
+        // Convert `A.B.C` into the `A::B::C` form used by the model
+        std::string qualified = (*it)[1];
+        for (char& c : qualified) {
+            if (c == '.') c = ':';
+        }
+        // Each `.` separator becomes `::`, so collapse the single-colon
+        // form produced above into the model's double-colon separators
+        std::string converted;
+        for (size_t i = 0; i < qualified.size(); ++i) {
+            converted += qualified[i];
+            if (qualified[i] == ':') converted += ':';
+        }
+        if (!path.empty()) path += "::";
+        path += converted;
+    }
+    return path;
+}
+
+} // namespace
+
 /**
  * @brief Parse a C# file and extract class information
  * @param file_path Path to the C# file
@@ -30,19 +89,27 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
     std::string content = buffer.str();
     file.close();
 
-    // Find class declarations
-    std::regex class_regex(R"(class\s+(\w+)(?:\s*:\s*(.+?))?\s*\{)");
+    // Find type declarations: `class`, `struct`, and `record` (including
+    // `record struct`). Group 1 is the declaration kind, the optional group
+    // 2 covers the `struct` keyword of a `record struct` pair, and group 3
+    // is the type name.
+    std::regex class_regex(R"(\b(class|struct|record)\s+(struct\s+)?(\w+)(?:\s*:\s*(.+?))?\s*\{)");
     std::smatch matches;
     std::string::const_iterator search_start(content.cbegin());
 
     std::unique_ptr<Class> parsed_class = nullptr;
 
     while (std::regex_search(search_start, content.cend(), matches, class_regex)) {
-        std::string class_name = matches[1];
-        std::string base_classes = matches[2];
+        std::string kind = matches[1];
+        std::string class_name = matches[3];
+        std::string base_classes = matches[4];
+
+        // Attribute the type to the innermost `namespace X.Y` enclosing it
+        std::string namespace_path = namespace_at(content, matches.position(0));
 
         // Create the class object
-        parsed_class = std::make_unique<Class>(class_name, "");
+        auto type = std::make_unique<Class>(class_name, namespace_path);
+        type->kind = kind;
 
         // Parse inheritance if exists
         if (!base_classes.empty()) {
@@ -52,15 +119,16 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
             std::string::const_iterator base_start(base_classes.cbegin());
 
             while (std::regex_search(base_start, base_classes.cend(), base_matches, base_regex)) {
-                parsed_class->add_inheritance(base_matches[1]);
+                type->add_inheritance(base_matches[1]);
                 base_start = base_matches.suffix().first;
             }
         }
 
-        // Parse methods and fields within the class
-        parse_class_content(content, matches.position(0), parsed_class.get());
+        // Parse methods and fields within the type
+        parse_class_content(content, matches.position(0), type.get());
 
-        break; // For now, we only process the first class found in a file
+        parsed_class = std::move(type);
+        break; // For now, we only process the first type found in a file
     }
 
     return parsed_class;

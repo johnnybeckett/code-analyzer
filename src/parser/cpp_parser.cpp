@@ -42,9 +42,20 @@ std::string trim(const std::string& s) {
 
 /**
  * @brief Remove // line comments and /* *​/ block comments from source text
+ *
+ * String and char literals are blanked out first (their contents replaced
+ * by empty markers), so that `//` or `/*` inside a literal (e.g. a URL)
+ * cannot start a phantom comment, and so that declarations appearing only
+ * inside string literals (e.g. `const char* s = "class Fake { }";`) are
+ * not mistaken for real class/struct/union declarations.
  */
 std::string strip_comments(const std::string& content) {
-    std::string result = std::regex_replace(content, std::regex(R"(//[^\n]*)"), "");
+    // Blank out literals before stripping comments
+    std::string result = std::regex_replace(content,
+        std::regex(R"("(?:\\.|[^"\\\n])*")"), "\"\"");
+    result = std::regex_replace(result,
+        std::regex(R"('(?:\\.|[^'\\\n])*')"), "''");
+    result = std::regex_replace(result, std::regex(R"(//[^\n]*)"), "");
     result = std::regex_replace(result, std::regex(R"(/\*[\s\S]*?\*/)"), "");
     return result;
 }
@@ -144,6 +155,7 @@ struct NamespaceRange {
     size_t start;                  // offset of the `namespace` keyword
     size_t end;                    // offset just past the matching '}'
     std::vector<std::string> segments;
+    bool anonymous = false;        // `namespace { ... }` (unnamed)
 };
 
 /**
@@ -168,6 +180,8 @@ std::vector<NamespaceRange> collect_namespaces(const std::string& content) {
         NamespaceRange range{static_cast<size_t>(it->position(0)), close_pos, {}};
         if (it->size() > 1 && (*it)[1].matched) {
             range.segments = split_qualified_name(it->str(1));
+        } else {
+            range.anonymous = true;
         }
         ranges.push_back(std::move(range));
     }
@@ -186,6 +200,12 @@ std::string namespace_at(const std::vector<NamespaceRange>& namespaces, size_t p
             for (const auto& seg : ns.segments) {
                 if (!path.empty()) path += "::";
                 path += seg;
+            }
+            // An anonymous namespace still scopes its contents; label it so
+            // the UI can distinguish it from the global namespace
+            if (ns.anonymous) {
+                if (!path.empty()) path += "::";
+                path += "(anonymous)";
             }
         }
     }
@@ -368,28 +388,39 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
     // innermost namespace enclosing its declaration
     const std::vector<NamespaceRange> namespaces = collect_namespaces(content);
 
-    // Match every `class Name { ... }` declaration in the file, whether or
-    // not it is a template specialization (`class Foo<int> {`) and whether or
-    // not it has a base clause. The base clause may itself contain template
-    // arguments (`class X : public std::enable_shared_from_this<X<T>> {`), so
-    // both the optional `<...>` after the name and the base list are matched
-    // with "anything but a brace or semicolon" rather than a fixed char set.
+    // Match every `class`/`struct`/`union Name { ... }` declaration in the
+    // file, whether or not it is a template specialization
+    // (`class Foo<int> {`), marked `final` (`class B final {`), and whether
+    // or not it has a base clause. The base clause may itself contain
+    // template arguments (`class X : public std::enable_shared_from_this<X<T>> {`),
+    // so both the optional `<...>` after the name and the base list are
+    // matched with "anything but a brace or semicolon" rather than a fixed
+    // char set. The `\b` word-boundary guard stops substrings like
+    // `myclass` from matching, and the optional `enum` prefix is captured so
+    // that scoped enums (`enum class Color { ... }`) can be rejected rather
+    // than misrecorded as classes.
     const std::regex class_regex(
-        R"(class\s+(\w+)(?:\s*<[^{};]*?>)?(?:\s*:\s*([^{};]+?))?\s*\{)");
+        R"(\b(enum\s+)?(class|struct|union)\s+(\w+)(?:\s*<[^{};]*?>)?(?:\s*final)?(?:\s*:\s*([^{};]+?))?\s*\{)");
 
     for (auto it = std::sregex_iterator(content.cbegin(), content.cend(), class_regex);
          it != std::sregex_iterator(); ++it) {
         const std::smatch& match = *it;
-        std::string class_name = match[1];
+
+        // `enum class` / `enum struct` are scoped enums, not class types
+        if (match[1].matched) continue;
+
+        const std::string kind = match[2];   // "class" | "struct" | "union"
+        std::string class_name = match[3];
         std::string namespace_path = namespace_at(namespaces, match.position(0));
 
         auto parsed_class = std::make_unique<Class>(class_name, namespace_path);
+        parsed_class->kind = kind;
 
         // Extract base classes from the base clause, normalising each to a
         // canonical name (access specifiers and a leading `::` are dropped,
         // so `::testing::Test` and `testing::Test` are identical)
-        if (match[2].matched) {
-            for (const auto& raw_base : split_parameters(match[2])) {
+        if (match[4].matched) {
+            for (const auto& raw_base : split_parameters(match[4])) {
                 std::string base = extract_base_name(raw_base);
                 if (!base.empty()) {
                     parsed_class->add_inheritance(base);
@@ -405,7 +436,7 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
             extract_members(*parsed_class, body);
         }
 
-        std::cout << "Found C++ class: "
+        std::cout << "Found C++ " << kind << ": "
                   << (namespace_path.empty() ? class_name : namespace_path + "::" + class_name)
                   << std::endl;
         classes.push_back(std::move(parsed_class));

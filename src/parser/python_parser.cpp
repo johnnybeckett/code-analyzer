@@ -33,20 +33,30 @@ std::unique_ptr<Class> PythonParser::parse_file(const std::string& file_path) {
 
         // Create the class with proper namespace handling
         auto parsed_class = std::make_unique<Class>(class_name, "");
+        parsed_class->kind = "class";  // Python types are always classes
 
-        // Extract inheritance information if present
+        // Extract inheritance information if present. Each comma-separated
+        // token is trimmed, and keyword arguments such as
+        // `metaclass=ABCMeta` are skipped — only plain base class names are
+        // recorded as inheritance.
         if (matches.size() > 2 && !matches[2].str().empty()) {
             std::string inheritance_list = matches[2].str();
-            // Simple split by comma for basic inheritance
-            size_t pos = 0;
-            std::string token;
-            while ((pos = inheritance_list.find(',')) != std::string::npos) {
-                token = inheritance_list.substr(0, pos);
-                parsed_class->add_inheritance(token);
-                inheritance_list.erase(0, pos + 1);
-            }
-            if (!inheritance_list.empty()) {
-                parsed_class->add_inheritance(inheritance_list);
+            size_t start = 0;
+            while (true) {
+                size_t pos = inheritance_list.find(',', start);
+                std::string token = (pos == std::string::npos)
+                    ? inheritance_list.substr(start)
+                    : inheritance_list.substr(start, pos - start);
+
+                size_t b = token.find_first_not_of(" \t");
+                size_t e = token.find_last_not_of(" \t");
+                token = (b == std::string::npos) ? "" : token.substr(b, e - b + 1);
+
+                if (!token.empty() && token.find('=') == std::string::npos) {
+                    parsed_class->add_inheritance(token);
+                }
+                if (pos == std::string::npos) break;
+                start = pos + 1;
             }
         }
 

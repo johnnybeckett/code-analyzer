@@ -42,6 +42,7 @@ boost::json::value to_json(const AnalysisResult& result, const std::string& inpu
     for (const auto& class_obj : result.classes) {
         json::object cj;
         cj["name"] = class_obj->name;
+        cj["kind"] = class_obj->kind;
         cj["namespace"] = class_obj->full_namespace;
         cj["visibility"] = visibility_name(class_obj->visibility);
         cj["static"] = class_obj->is_static;
