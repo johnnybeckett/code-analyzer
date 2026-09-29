@@ -5,6 +5,7 @@
 #include <regex>
 #include <sstream>
 #include <iterator>
+#include <utility>
 #include <boost/json.hpp>
 
 /**
@@ -24,16 +25,25 @@ class UMLGenerator {
 private:
     std::vector<std::string> input_files;
     std::vector<std::string> hidden_classes_regex;
+    // Diff mode: when two files are given (older.json newer.json) the first
+    // is the baseline and the second the new state; the diagram highlights
+    // what was added (green) and removed (red).
+    bool diff_mode;
 
 public:
     /**
      * @brief Constructor
      * @param files List of JSON input files to process
      * @param hide_patterns Regex patterns for classes to hide
+     *
+     * One file  -> a single combined diagram.
+     * Two files -> diff mode: files[0] is the older baseline, files[1] the
+     *              newer state (added members in green, removed in red).
      */
     UMLGenerator(const std::vector<std::string>& files,
                  const std::vector<std::string>& hide_patterns)
-        : input_files(files), hidden_classes_regex(hide_patterns) {}
+        : input_files(files), hidden_classes_regex(hide_patterns),
+          diff_mode(files.size() >= 2) {}
 
     /**
      * @brief Process all input files and generate HTML output
@@ -238,6 +248,18 @@ private:
         }
         .badge.static { background: #7c3aed; color: #fff; }
         .badge.vis { background: var(--badge-vis-bg); color: var(--badge-vis-fg); }
+        .badge.diff { font-weight: 600; }
+        .badge.diff.added   { background: #188038; color: #fff; }
+        .badge.diff.removed { background: #c5221f; color: #fff; }
+        .badge.diff.modified{ background: #b06000; color: #fff; }
+        .classCard li.dm.added   { color: #188038; }
+        .classCard li.dm.added .ret,
+        .classCard li.dm.added .nm,
+        .classCard li.dm.added .params { color: #188038; }
+        .classCard li.dm.removed { color: #c5221f; text-decoration: line-through; }
+        .classCard li.dm.removed .ret,
+        .classCard li.dm.removed .nm,
+        .classCard li.dm.removed .params { color: #c5221f; }
         .none { color: var(--faint); font-size: 12px; }
         /* Sidebar tree: one collapsible node per namespace */
         .nsHeader {
@@ -296,6 +318,13 @@ private:
             <div><span class="tri"></span>&nbsp; generalization (extends)</div>
             <div><span class="sym">+</span> public &middot; <span class="sym">-</span> private &middot; <span class="sym">#</span> protected</div>
             <div><span class="sym u">member</span> static &middot; <span class="sym i">member</span> virtual</div>
+            <div id="diffLegend" style="display:none">
+                <span style="display:inline-block;width:10px;height:10px;background:#188038;border-radius:2px;margin-right:4px;vertical-align:baseline"></span> added
+                &middot;
+                <span style="display:inline-block;width:10px;height:10px;background:#c5221f;border-radius:2px;margin:0 4px 0 8px;vertical-align:baseline"></span> removed
+                &middot;
+                <span style="display:inline-block;width:10px;height:10px;background:#b06000;border-radius:2px;margin:0 4px 0 8px;vertical-align:baseline"></span> modified
+            </div>
         </div>
         <h3>Filter classes</h3>
         <input type="text" id="filterInput" placeholder="regex, e.g. ^Parser|Generator$"
@@ -303,6 +332,13 @@ private:
         <button onclick="applyFilter()">Apply Filter</button>
         <button class="secondary" onclick="resetFilter()">Reset</button>
         <button class="secondary" onclick="resetView()">Reset View</button>
+        <div id="diffWrap" style="display:none">
+            <h3>Diff view</h3>
+            <select id="diffSelect">
+                <option value="changes" selected>Changes only</option>
+                <option value="everything">Show everything</option>
+            </select>
+        </div>
         <h3>Layout</h3>
         <select id="layoutSelect">
             <option value="linear">Linear (hierarchy)</option>
@@ -334,13 +370,20 @@ private:
         </select>
         <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class &middot; click a class name in the sidebar to focus</div>
         <div id="stats"></div>
+        <div id="diffStats" style="display:none"></div>
         </div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
 
     <script>
-        // Class data produced by the code analyzer
-        const rawClasses = __CLASSES_JSON__;
+        // Class data produced by the code analyzer.
+        //   DIFF_MODE true  -> two files given (older newer): OLD_CLASSES is the
+        //                      baseline, NEW_CLASSES the new state.
+        //   DIFF_MODE false -> one file: NEW_CLASSES holds the combined set,
+        //                      OLD_CLASSES is [].
+        const DIFF_MODE = __DIFF_MODE__;
+        const OLD_CLASSES = __OLD_CLASSES_JSON__;
+        const NEW_CLASSES = __NEW_CLASSES_JSON__;
 
         const esc = s => String(s).replace(/[&<>"]/g,
             ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch]));
@@ -381,7 +424,96 @@ private:
                 variables: [...m.vars.values()],
             }));
         }
-        const classes = mergeClasses(rawClasses);
+        const newMerged = mergeClasses(NEW_CLASSES);
+        const oldMerged = DIFF_MODE ? mergeClasses(OLD_CLASSES) : [];
+
+        // Diff two merged class sets (old baseline vs new state) and annotate
+        // every class with a status and every method/variable with an __diff
+        // marker:
+        //   class   status: added | removed | modified | unchanged
+        //   member  __diff: added | removed | unchanged
+        // Identity keys match mergeClasses(): class = namespace::name,
+        // method = name + parameters, variable = name.
+        function computeDiff(oldList, newList) {
+            const mkey = mt => JSON.stringify([mt.name, mt.parameters || []]);
+            const vkey = v => v.name;
+
+            function diffMembers(oldArr, newArr, keyFn) {
+                const om = new Map((oldArr || []).map(x => [keyFn(x), x]));
+                const nm = new Map((newArr || []).map(x => [keyFn(x), x]));
+                const list = [];
+                let changed = false;
+                for (const [k, nv] of nm) {
+                    const st = om.has(k) ? 'unchanged' : 'added';
+                    if (st === 'added') changed = true;
+                    const cp = Object.assign({}, nv);
+                    cp.__diff = st;
+                    list.push(cp);
+                }
+                for (const [k, ov] of om) {
+                    if (nm.has(k)) continue;
+                    changed = true;
+                    const cp = Object.assign({}, ov);
+                    cp.__diff = 'removed';
+                    list.push(cp);
+                }
+                return { list, changed };
+            }
+
+            const omap = new Map(oldList.map(c => [c.namespace + '::' + c.name, c]));
+            const nmap = new Map(newList.map(c => [c.namespace + '::' + c.name, c]));
+            const result = [];
+
+            for (const [key, n] of nmap) {
+                const o = omap.get(key);
+                const c = Object.assign({}, n);
+                if (!o) {
+                    c.status = 'added';
+                    c.methods = n.methods.map(m => Object.assign({}, m, { __diff: 'added' }));
+                    c.variables = n.variables.map(v => Object.assign({}, v, { __diff: 'added' }));
+                } else {
+                    const md = diffMembers(o.methods, n.methods, mkey);
+                    const vd = diffMembers(o.variables, n.variables, vkey);
+                    // A change to the base classes is also a structural edit,
+                    // so the class must not read as "unchanged"
+                    const inheritChanged =
+                        JSON.stringify(o.inheritance || []) !==
+                        JSON.stringify(n.inheritance || []);
+                    c.status = (md.changed || vd.changed || inheritChanged)
+                        ? 'modified' : 'unchanged';
+                    c.methods = md.list;
+                    c.variables = vd.list;
+                }
+                result.push(c);
+            }
+
+            for (const [key, o] of omap) {
+                if (nmap.has(key)) continue;
+                const c = Object.assign({}, o);
+                c.status = 'removed';
+                c.methods = o.methods.map(m => Object.assign({}, m, { __diff: 'removed' }));
+                c.variables = o.variables.map(v => Object.assign({}, v, { __diff: 'removed' }));
+                result.push(c);
+            }
+
+            return result;
+        }
+
+        const classes = DIFF_MODE ? computeDiff(oldMerged, newMerged) : newMerged;
+
+        // --- Visibility state (diff filter + name filter, applied together) ---
+        // Default: in diff mode hide unchanged classes so only the changes show.
+        let showOnlyChanges = DIFF_MODE;
+        let currentRegex = null;
+        // name -> status (undefined in non-diff mode). Used to hide 'unchanged'
+        // nodes when "Changes only" is active. (Name-keyed: same-named classes in
+        // different namespaces are already merged into one node — pre-existing.)
+        const statusByName = new Map();
+        classes.forEach(c => { if (c.status) statusByName.set(c.name, c.status); });
+        const diffVisible = status => !(DIFF_MODE && showOnlyChanges && status === 'unchanged');
+        const regexVisible = name => !currentRegex || currentRegex.test(name);
+        const classVisible = name =>
+            regexVisible(name) && diffVisible(statusByName.get(name));
 
         // --- UML notation helpers ---
         const VIS_GLYPH = { public: '+', private: '-', protected: '#' };
@@ -408,6 +540,7 @@ private:
                 underline: !!v['static'],
                 // Raw type strings, resolved to a class on double-click
                 types: [String(v.type || '').trim()].filter(Boolean),
+                status: v.__diff || null,
             };
         }
 
@@ -421,6 +554,7 @@ private:
                 underline: stat,
                 types: [ret, ...(m.parameters || [])]
                     .map(t => String(t || '').trim()).filter(Boolean),
+                status: m.__diff || null,
             };
         }
 
@@ -436,10 +570,22 @@ private:
             return (k && k !== 'class' ? k + ' ' : '') + (c ? c.name : '');
         };
 
+        // Diff coloring (the class box is a self-contained canvas, so these are
+        // theme-independent). added = green, removed = red, modified = amber.
+        const MEMBER_COLOR = { added: '#188038', removed: '#c5221f' };
+        const DIFF_STYLE = {
+            added:     { bg: '#e6f4ea', border: '#188038' },
+            removed:   { bg: '#fce8e6', border: '#c5221f' },
+            modified:  { bg: '#fef7e0', border: '#b06000' },
+            unchanged: { bg: '#f8fafc', border: '#0f172a' },
+        };
+        const diffStyle = s => DIFF_STYLE[s] || DIFF_STYLE.unchanged;
+
         function drawMemberRow(ctx, row, y) {
             const base = y + ROW_H / 2;
             ctx.font = (row.italic ? 'italic ' : '') + TEXT;
-            ctx.fillStyle = '#0f172a';
+            const color = MEMBER_COLOR[row.status] || '#0f172a';
+            ctx.fillStyle = color;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
             const pre = row.glyph + '  ';
@@ -448,11 +594,20 @@ private:
             ctx.fillText(row.text, PAD + preW, base);
             if (row.underline) { // UML: static members are underlined
                 const w = ctx.measureText(pre + row.text).width;
-                ctx.strokeStyle = '#0f172a';
+                ctx.strokeStyle = color;
                 ctx.lineWidth = 1;
                 ctx.beginPath();
                 ctx.moveTo(PAD, base + 9);
                 ctx.lineTo(PAD + w, base + 9);
+                ctx.stroke();
+            }
+            if (row.status === 'removed') { // UML-agnostic: strike through drops
+                const w = ctx.measureText(pre + row.text).width;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(PAD, base);
+                ctx.lineTo(PAD + w, base);
                 ctx.stroke();
             }
         }
@@ -481,10 +636,11 @@ private:
             const ctx = canvas.getContext('2d');
             ctx.scale(scale, scale);
 
-            ctx.fillStyle = '#f8fafc';
+            const style = diffStyle(cls.status || 'unchanged');
+            ctx.fillStyle = style.bg;
             ctx.fillRect(0, 0, width, height);
             if (external) ctx.setLineDash([6, 4]);
-            ctx.strokeStyle = '#0f172a';
+            ctx.strokeStyle = style.border;
             ctx.lineWidth = 2;
             ctx.strokeRect(1, 1, width - 2, height - 2);
             ctx.setLineDash([]);
@@ -1239,11 +1395,16 @@ private:
             const card = document.createElement('div');
             card.className = 'classCard';
             card.dataset.name = c.name;
+            card.dataset.status = c.status || '';
             const node = nodes.get(c.name);
             card.addEventListener('mouseenter', () => setHighlight(node, true));
             card.addEventListener('mouseleave', () => setHighlight(node, false));
 
-            let html = '<h3>' + esc(displayName(c)) + '</h3>';
+            let html = '<h3>' + esc(displayName(c));
+            if (c.status) {
+                html += ' <span class="badge diff ' + c.status + '">' + c.status + '</span>';
+            }
+            html += '</h3>';
             const bases = c.inheritance || [];
             if (bases.length) html += '<div class="bases">«extends» ' + bases.map(esc).join(', ') + '</div>';
 
@@ -1251,14 +1412,19 @@ private:
             const variables = c.variables || [];
             if (methods.length) {
                 html += '<h4>Methods (' + methods.length + ')</h4><ul>'
-                    + methods.map(m => '<li>' + signature(m) + '</li>').join('')
+                    + methods.map(m =>
+                        '<li class="dm ' + (m.__diff || 'unchanged') + '">'
+                        + signature(m) + '</li>'
+                    ).join('')
                     + '</ul>';
             }
             if (variables.length) {
                 html += '<h4>Members (' + variables.length + ')</h4><ul>'
                     + variables.map(v =>
-                        '<li><span class="ret">' + esc((v.type || '').trim())
-                        + '</span> <span class="nm">' + esc(v.name) + '</span></li>'
+                        '<li class="dm ' + (v.__diff || 'unchanged') + '">'
+                        + '<span class="ret">' + esc((v.type || '').trim())
+                        + '</span> <span class="nm">' + esc(v.name) + '</span>'
+                        + '</li>'
                     ).join('')
                     + '</ul>';
             }
@@ -1324,11 +1490,12 @@ private:
                 = shown + ' of ' + classes.length + ' classes shown';
         }
 
-        // --- Filtering (classes are hidden in both the 3D scene and the panel) ---
-        function setFilter(re) {
+        // --- Visibility: apply the diff filter and the name filter together
+        // --- (classes are hidden in both the 3D scene and the panel)
+        function applyVisibility() {
             const realVisible = new Map();
             nodes.forEach(n => {
-                if (!n.external) realVisible.set(n.name, !re || re.test(n.name));
+                if (!n.external) realVisible.set(n.name, classVisible(n.name));
             });
             nodes.forEach(n => {
                 let visible;
@@ -1353,9 +1520,11 @@ private:
                 p.mesh.visible = show;
             });
             document.querySelectorAll('.classCard').forEach(card => {
-                card.style.display = (!re || re.test(card.dataset.name)) ? '' : 'none';
+                const vis = regexVisible(card.dataset.name)
+                    && diffVisible(card.dataset.status);
+                card.style.display = vis ? '' : 'none';
             });
-            // Hide a namespace group whose classes are all filtered out
+            // Hide a namespace group whose classes are all hidden
             document.querySelectorAll('.nsGroup').forEach(g => {
                 const anyShown = [...g.querySelectorAll('.classCard')]
                     .some(card => card.style.display !== 'none');
@@ -1366,16 +1535,18 @@ private:
 
         function applyFilter() {
             const value = document.getElementById('filterInput').value.trim();
-            if (!value) { setFilter(null); return; }
+            if (!value) { currentRegex = null; applyVisibility(); return; }
             let re;
             try { re = new RegExp(value); }
             catch (err) { alert('Invalid regex: ' + err.message); return; }
-            setFilter(re);
+            currentRegex = re;
+            applyVisibility();
         }
 
         function resetFilter() {
             document.getElementById('filterInput').value = '';
-            setFilter(null);
+            currentRegex = null;
+            applyVisibility();
         }
 
         buildSidebar();
@@ -1407,6 +1578,24 @@ private:
         });
         applyLayout(layoutSelect.value);
 
+        // Diff mode: reveal the toggle and legend, report the counts, and wire
+        // the "changes only / everything" selector (default: changes only)
+        if (DIFF_MODE) {
+            document.getElementById('diffWrap').style.display = '';
+            document.getElementById('diffLegend').style.display = '';
+            const counts = { added: 0, removed: 0, modified: 0 };
+            classes.forEach(c => { if (counts[c.status] !== undefined) counts[c.status]++; });
+            const diffStats = document.getElementById('diffStats');
+            diffStats.textContent = 'Diff: ' + counts.added + ' added · '
+                + counts.removed + ' removed · ' + counts.modified + ' modified';
+            diffStats.style.display = '';
+            const diffSelect = document.getElementById('diffSelect');
+            diffSelect.addEventListener('change', () => {
+                showOnlyChanges = (diffSelect.value === 'changes');
+                applyVisibility();
+            });
+        }
+
         // Minimize the controls panel to a compact bar, and back again
         const controls = document.getElementById('controls');
         const minimizeBtn = document.getElementById('minimizeBtn');
@@ -1419,49 +1608,100 @@ private:
 </body>
 </html>)HTMLDOC";
 
-        // Splice the real class data into the template
-        const std::string placeholder = "__CLASSES_JSON__";
-        const std::string classes_json = getClassesJSON(parseInputFiles());
-        const size_t pos = html.find(placeholder);
-        if (pos != std::string::npos) {
-            html.replace(pos, placeholder.size(), classes_json);
+        // Splice the real class data into the template.
+        //   - single file: one merged class set, diff off
+        //   - two files:   old (files[0]) and new (files[1]), diff on
+        std::string old_json, new_json;
+        const bool diff = diff_mode && input_files.size() >= 2;
+        if (diff) {
+            old_json = getClassesJSON(parseFileClasses(input_files[0]));
+            new_json = getClassesJSON(parseFileClasses(input_files[1]));
+        } else {
+            std::vector<std::string> all;
+            for (const auto& f : input_files) {
+                const auto c = parseFileClasses(f);
+                all.insert(all.end(), c.begin(), c.end());
+            }
+            old_json = "[]";
+            new_json = getClassesJSON(all);
         }
+        spliceAll(html, {
+            { "__DIFF_MODE__",       diff ? "true" : "false" },
+            { "__OLD_CLASSES_JSON__", old_json },
+            { "__NEW_CLASSES_JSON__", new_json },
+        });
 
         return html;
     }
 
     /**
-     * @brief Parse input JSON files and extract class data
-     * @return Vector of class data strings
+     * @brief Replace all placeholders with their values in a single pass
+     *
+     * Scans the template left to right. When a placeholder token is hit, its
+     * value is emitted verbatim and the scan continues *past* the token — the
+     * emitted value is never re-scanned. This makes the splice independent of
+     * substitution order and immune to a class's name/type literally
+     * containing a placeholder token (e.g. a method named
+     * "__NEW_CLASSES_JSON__"), which the old find/replace-once sequence could
+     * corrupt by matching the token inside already-injected data.
+     *
+     * @param html   Document to modify in place
+     * @param subs   Placeholder token → replacement value pairs
      */
-    std::vector<std::string> parseInputFiles() {
+    static void spliceAll(std::string& html,
+                          const std::vector<std::pair<std::string, std::string>>& subs) {
+        std::string out;
+        out.reserve(html.size());
+        size_t i = 0;
+        while (i < html.size()) {
+            bool matched = false;
+            for (const auto& kv : subs) {
+                if (html.compare(i, kv.first.size(), kv.first) == 0) {
+                    out += kv.second;
+                    i += kv.first.size();
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                out += html[i];
+                ++i;
+            }
+        }
+        html = std::move(out);
+    }
+
+    /**
+     * @brief Parse one JSON file and extract its class records
+     * @param filename Path to a single analyzer JSON file
+     * @return Vector of serialized class objects
+     */
+    static std::vector<std::string> parseFileClasses(const std::string& filename) {
         std::vector<std::string> class_data;
         namespace json = boost::json;
 
-        for (const auto& filename : input_files) {
-            std::ifstream file(filename);
-            if (!file.is_open()) {
-                std::cerr << "Warning: Could not open file " << filename << std::endl;
-                continue;
-            }
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Warning: Could not open file " << filename << std::endl;
+            return class_data;
+        }
 
-            boost::system::error_code ec;
-            json::value root = json::parse(file, ec);
-            if (ec) {
-                std::cerr << "Warning: failed to parse " << filename << ": " << ec.message() << std::endl;
-                continue;
-            }
+        boost::system::error_code ec;
+        json::value root = json::parse(file, ec);
+        if (ec) {
+            std::cerr << "Warning: failed to parse " << filename << ": " << ec.message() << std::endl;
+            return class_data;
+        }
 
-            if (!root.is_object() || !root.as_object().contains("classes")
-                || !root.as_object().at("classes").is_array()) {
-                std::cerr << "Warning: no 'classes' array in " << filename << std::endl;
-                continue;
-            }
+        if (!root.is_object() || !root.as_object().contains("classes")
+            || !root.as_object().at("classes").is_array()) {
+            std::cerr << "Warning: no 'classes' array in " << filename << std::endl;
+            return class_data;
+        }
 
-            // Serialize each class object so the browser receives the real data
-            for (const auto& cls : root.as_object().at("classes").as_array()) {
-                class_data.push_back(json::serialize(cls));
-            }
+        // Serialize each class object so the browser receives the real data
+        for (const auto& cls : root.as_object().at("classes").as_array()) {
+            class_data.push_back(json::serialize(cls));
         }
 
         return class_data;
@@ -1495,8 +1735,15 @@ void print_usage(const std::string& program_name) {
     std::cout << "  --hide <regex>             Hide classes matching regex pattern\n";
     std::cout << "  -h, --help                 Show this help message\n";
     std::cout << "\n";
+    std::cout << "  One file     -> a single combined diagram\n";
+    std::cout << "  Two files    -> diff mode, in 'older newer' order:\n";
+    std::cout << "                    added (green), removed (red) at the\n";
+    std::cout << "                    class, method and member level\n";
+    std::cout << "  More than two -> diff uses the first two; the rest ignored\n";
+    std::cout << "\n";
     std::cout << "Examples:\n";
-    std::cout << "  " << program_name << " data1.json data2.json\n";
+    std::cout << "  " << program_name << " data.json\n";
+    std::cout << "  " << program_name << " older.json newer.json\n";
     std::cout << "  " << program_name << " --hide \"^std::|Test$\" data.json\n";
 }
 
@@ -1527,6 +1774,10 @@ int main(int argc, char* argv[]) {
         } else {
             input_files.push_back(arg);
         }
+    }
+
+    if (input_files.size() > 2) {
+        std::cerr << "Warning: diff mode uses the first two files; ignoring the rest\n";
     }
 
     // Create and run the UML generator
