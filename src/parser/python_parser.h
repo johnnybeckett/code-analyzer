@@ -1,7 +1,7 @@
 #ifndef PYTHON_PARSER_H
 #define PYTHON_PARSER_H
 
-#include "../core/model.h"
+#include "core/model.h"
 #include <string>
 #include <memory>
 

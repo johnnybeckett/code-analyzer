@@ -1,45 +1,65 @@
 #ifndef ANALYSIS_OBSERVER_H
 #define ANALYSIS_OBSERVER_H
 
-#include <string>
+#include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 /**
- * @brief Base observer interface for analysis events
+ * @brief A single event emitted by the analyzer while it works.
+ *
+ * A typed struct (rather than a free-form string) so observers can switch on
+ * the event kind and read the fields they need.
+ */
+struct AnalysisEvent {
+    /** @brief The kind of event that occurred. */
+    enum class Kind {
+        FileParsed,      ///< A source file was processed (see `file`).
+        AnalysisComplete ///< The whole analysis finished (see `class_count`).
+    };
+
+    Kind kind = Kind::FileParsed;
+    std::string file;              ///< FileParsed: path of the processed file
+    std::size_t class_count = 0;   ///< AnalysisComplete: number of classes found
+};
+
+/**
+ * @brief Base interface for observers of analysis events (Observer).
  */
 class AnalysisObserver {
 public:
     virtual ~AnalysisObserver() = default;
 
     /**
-     * @brief Notify observer of analysis event
-     * @param event Description of the event
+     * @brief React to an event.
+     * @param event The event that occurred
      */
-    virtual void update(const std::string& event) = 0;
+    virtual void update(const AnalysisEvent& event) = 0;
 };
 
 /**
- * @brief Analysis event dispatcher using observer pattern
+ * @brief Delivers analysis events to the observers registered with it.
+ *
+ * Deliberately NOT a singleton: the composition root constructs one and
+ * injects it, so observer registrations cannot leak across analyzer
+ * instances or across test cases sharing a process.
  */
 class EventDispatcher {
 public:
-    static EventDispatcher& getInstance();
+    /**
+     * @brief Register an observer (the dispatcher takes ownership).
+     * @param observer Observer to notify for every subsequent event
+     */
+    void add_observer(std::unique_ptr<AnalysisObserver> observer);
 
     /**
-     * @brief Register an observer
-     * @param observer Observer to register
+     * @brief Deliver the event to every observer, in registration order.
+     * @param event The event to deliver
      */
-    void addObserver(std::unique_ptr<AnalysisObserver> observer);
-
-    /**
-     * @brief Notify all observers of an event
-     * @param event Description of the event
-     */
-    void notify(const std::string& event);
+    void notify(const AnalysisEvent& event) const;
 
 private:
-    EventDispatcher() = default;
     std::vector<std::unique_ptr<AnalysisObserver>> observers_;
 };
 

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
-#include "../../src/parser/cpp_parser.h"
-#include "../../src/parser/csharp_parser.h"
-#include "../../src/parser/python_parser.h"
-#include "../../src/core/model.h"
+#include "parser/cpp_parser.h"
+#include "parser/csharp_parser.h"
+#include "parser/python_parser.h"
+#include "core/model.h"
 #include <fstream>
 #include <filesystem>
 #include <string>

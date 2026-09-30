@@ -1,7 +1,7 @@
 #ifndef CSHARP_PARSER_H
 #define CSHARP_PARSER_H
 
-#include "../core/model.h"
+#include "core/model.h"
 #include <string>
 #include <memory>
 

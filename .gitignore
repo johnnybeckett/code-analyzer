@@ -1,5 +1,6 @@
 # Build directories
 build/
+build-*/
 cmake-build-debug/
 cmake-build-release/
 
@@ -25,3 +26,11 @@ docs/doxygen/
 CMakeCache.txt
 CMakeFiles/
 Makefile
+
+# Generated analyzer / UML / docs outputs
+analysis.json
+uml_diagram.html
+code_analyzer_docs.html
+
+# Local Claude Code session state
+.claude/

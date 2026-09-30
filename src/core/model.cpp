@@ -1,4 +1,4 @@
-#include "model.h"
+#include "core/model.h"
 
 // CodeElement implementation
 CodeElement::CodeElement(const std::string& name, const std::string& full_namespace,

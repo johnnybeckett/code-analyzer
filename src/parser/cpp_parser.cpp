@@ -1,5 +1,5 @@
-#include "cpp_parser.h"
-#include "../core/model.h"
+#include "parser/cpp_parser.h"
+#include "core/model.h"
 #include <iostream>
 #include <fstream>
 #include <regex>

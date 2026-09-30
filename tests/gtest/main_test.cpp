@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
-#include "../../src/core/analyzer.h"
-#include "../../src/parser/cpp_parser.h"
-#include "../../src/core/model.h"
+#include "core/analyzer.h"
+#include "parser/cpp_parser.h"
+#include "core/model.h"
 #include <fstream>
 #include <filesystem>
 #include <string>
@@ -79,7 +79,10 @@ TEST(AnalyzerTest, ParseTppFile) {
     std::ofstream((dir / "sole.tpp").string())
         << "class SoleInTpp {\npublic:\n    void run();\n};\n";
 
-    auto result = Analyzer::analyze_project(dir.string());
+    ParserRegistry registry = ParserRegistry::standard();
+    Config config;
+    Analyzer analyzer(config, registry);
+    auto result = analyzer.analyze_project(dir.string());
 
     bool found = false;
     for (auto& c : result.classes) {

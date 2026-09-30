@@ -1,5 +1,5 @@
-#include "csharp_parser.h"
-#include "../core/model.h"
+#include "parser/csharp_parser.h"
+#include "core/model.h"
 #include <iostream>
 #include <fstream>
 #include <regex>

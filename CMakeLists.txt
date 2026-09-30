@@ -16,23 +16,32 @@ find_package(GTest REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Boost 1.71 REQUIRED COMPONENTS json)
 
-# Add executable
-add_executable(${PROJECT_NAME}
-    src/main.cpp
+# Core static library: shared by the production binary and the test suite.
+add_library(code_analyzer_core STATIC
     src/core/model.cpp
     src/core/analyzer.cpp
-    src/core/visitor.cpp
-    src/core/factory.cpp
+    src/core/parser_registry.cpp
     src/core/config.cpp
+    src/core/report_visitor.cpp
+    src/core/json_serializer.cpp
     src/parser/cpp_parser.cpp
     src/parser/csharp_parser.cpp
     src/parser/python_parser.cpp
     src/observers/analysis_observer.cpp
+    src/observers/console_observer.cpp
 )
 
-# Add UML generator executable
+# Add executable (thin entry point over the core library)
+add_executable(${PROJECT_NAME}
+    src/main.cpp
+)
+
+# Add UML generator executable (template.h carries the embedded HTML/JS page)
 add_executable(UMLGenerator
-    src/uml_generator.cpp
+    src/uml/main.cpp
+    src/uml/uml_generator.cpp
+    src/uml/class_loader.cpp
+    src/uml/template_renderer.cpp
 )
 
 # Add documentation generator executable
@@ -40,27 +49,23 @@ add_executable(DocumentationGenerator
     tools/self_documenter.cpp
 )
 
-# Include directories
-target_include_directories(${PROJECT_NAME} PRIVATE
+# Core library: single include root (src/) so headers are addressed as
+# core/model.h, parser/cpp_parser.h, etc. Dependencies propagate to consumers.
+target_include_directories(code_analyzer_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/parser
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/observers
-    ${Boost_INCLUDE_DIRS}
+)
+target_link_libraries(code_analyzer_core PUBLIC
+    Boost::json
+    Threads::Threads
 )
 
 target_include_directories(UMLGenerator PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${Boost_INCLUDE_DIRS}
 )
 
-# Link libraries
-target_link_libraries(${PROJECT_NAME}
-    GTest::gtest
-    GTest::gtest_main
-    Threads::Threads
-    Boost::json
+# Production binary: links only the core library (no test framework).
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    code_analyzer_core
 )
 
 # Link libraries for UML generator

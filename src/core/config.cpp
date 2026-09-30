@@ -1,32 +1,73 @@
-#include "config.h"
+#include "core/config.h"
+
+#include <boost/json.hpp>
 #include <fstream>
-#include <iostream>
+#include <sstream>
 
-Config& Config::getInstance() {
-    static Config instance;
-    return instance;
-}
+namespace {
 
-void Config::set(const std::string& key, const std::string& value) {
-    config_map_[key] = value;
-}
-
-std::string Config::get(const std::string& key) const {
-    auto it = config_map_.find(key);
-    if (it != config_map_.end()) {
-        return it->second;
+boost::json::array to_json_array(const std::vector<std::string>& values) {
+    boost::json::array arr;
+    for (const auto& v : values) {
+        arr.emplace_back(v);
     }
-    return "";
+    return arr;
 }
 
-void Config::loadFromFile(const std::string& config_file) {
-    // In a real implementation, this would parse configuration file
-    std::cout << "Loading configuration from: " << config_file << std::endl;
-    // Placeholder - would read file and populate config_map_
+/**
+ * @brief Read a string-array option out of a configuration document.
+ *
+ * A missing key is not an error: the caller's default is kept. A present key
+ * that is not a JSON array of strings is a malformed document.
+ */
+bool read_string_array(const boost::json::value& doc, const char* key,
+                       std::vector<std::string>& out) {
+    if (!doc.is_object()) return false;
+    const auto& obj = doc.as_object();
+    auto it = obj.find(key);
+    if (it == obj.end()) return true;  // absent: keep the caller's default
+    if (!it->value().is_array()) return false;
+    out.clear();
+    for (const auto& el : it->value().as_array()) {
+        if (!el.is_string()) return false;
+        out.emplace_back(el.as_string());
+    }
+    return true;
 }
 
-void Config::saveToFile(const std::string& config_file) {
-    // In a real implementation, this would save configuration to file
-    std::cout << "Saving configuration to: " << config_file << std::endl;
-    // Placeholder - would write config_map_ to file
+} // namespace
+
+std::optional<Config> Config::load(const std::string& path) {
+    std::ifstream in(path);
+    if (!in) return std::nullopt;
+    std::ostringstream buf;
+    buf << in.rdbuf();
+
+    boost::json::value doc;
+    try {
+        doc = boost::json::parse(buf.str());
+    } catch (const std::exception&) {
+        return std::nullopt;  // malformed document
+    }
+
+    Config config;
+    if (!read_string_array(doc, "source_extensions", config.source_extensions) ||
+        !read_string_array(doc, "skip_dirs", config.skip_dirs)) {
+        return std::nullopt;
+    }
+    return config;
+}
+
+std::optional<std::string> Config::save(const std::string& path) const {
+    boost::json::object doc;
+    doc["source_extensions"] = to_json_array(source_extensions);
+    doc["skip_dirs"] = to_json_array(skip_dirs);
+    const std::string text = boost::json::serialize(doc);
+
+    std::ofstream out(path);
+    if (!out) return std::nullopt;
+    out << text;
+    out.close();
+    if (!out) return std::nullopt;
+    return text;
 }

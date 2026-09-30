@@ -1,46 +1,58 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include <optional>
 #include <string>
-#include <map>
-#include <memory>
+#include <vector>
 
 /**
- * @brief Configuration manager using singleton pattern
+ * @brief Typed, value-semantic analysis configuration.
+ *
+ * Replaces the old untyped key/string singleton: options are plain data
+ * members (copyable, comparable, testable — no global state to leak between
+ * tests or call sites), and documents round-trip through JSON via load/save.
+ *
+ * JSON shape:
+ *   {
+ *     "source_extensions": [".cpp", ".cs", ".py"],
+ *     "skip_dirs":         [".git", "build"]
+ *   }
+ * Either key may be omitted; the built-in default is kept for that option.
  */
-class Config {
-public:
-    static Config& getInstance();
+struct Config {
+    /**
+     * File extensions (including the dot) that may be parsed. This is the
+     * analyzer's standard set — the same list ParserRegistry::standard()
+     * registers. Extensions named here that no parser handles are ignored.
+     */
+    std::vector<std::string> source_extensions{
+        ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".hxx", ".hh", ".tpp", ".tcc",
+        ".cs", ".py"
+    };
 
     /**
-     * @brief Set a configuration value
-     * @param key Configuration key
-     * @param value Configuration value
+     * Directory names never to descend into during a project walk (VCS
+     * metadata, build artifacts, tooling state).
      */
-    void set(const std::string& key, const std::string& value);
+    std::vector<std::string> skip_dirs{
+        ".git", "build", "cmake-build", "out", "node_modules", ".claude"
+    };
 
     /**
-     * @brief Get a configuration value
-     * @param key Configuration key
-     * @return Configuration value or empty string if not found
+     * @brief Load configuration from a JSON file.
+     * @param path Path to the configuration file
+     * @return The parsed configuration, or std::nullopt if the file cannot be
+     *         read or is not a valid configuration document.
      */
-    std::string get(const std::string& key) const;
+    static std::optional<Config> load(const std::string& path);
 
     /**
-     * @brief Load configuration from file
-     * @param config_file Path to configuration file
+     * @brief Save this configuration to a JSON file.
+     * @param path Path to write
+     * @return The serialized document on success, std::nullopt if the file
+     *         could not be written.
      */
-    void loadFromFile(const std::string& config_file);
-
-    /**
-     * @brief Save configuration to file
-     * @param config_file Path to configuration file
-     */
-    void saveToFile(const std::string& config_file);
-
-private:
-    Config() = default;
-    std::map<std::string, std::string> config_map_;
+    std::optional<std::string> save(const std::string& path) const;
 };
 
 #endif // CONFIG_H

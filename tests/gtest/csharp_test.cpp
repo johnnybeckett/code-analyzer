@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <fstream>
 #include <string>
-#include "../../src/parser/csharp_parser.h"
-#include "../../src/core/model.h"
+#include "parser/csharp_parser.h"
+#include "core/model.h"
 
 // Test that the C# parser can be instantiated and compiled
 TEST(CSharpParserTest, CanBeInstantiated) {
