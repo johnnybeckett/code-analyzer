@@ -299,7 +299,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             <option value="light">Light</option>
             <option value="blue">Vim darkblue</option>
         </select>
-        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class &middot; click a class name in the sidebar to focus</div>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class &middot; click a class name in the sidebar to focus &middot; keys: n / &rarr; next class &middot; p / &larr; previous class &middot; c center view</div>
         <div id="stats"></div>
         <div id="diffStats" style="display:none"></div>
         </div>
@@ -1481,6 +1481,65 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         buildSidebar();
+
+        // --- Keyboard navigation: next / previous / center ---
+        // n or → steps to the next class, p or ← to the previous one — both
+        // wrap around the classes currently shown in the sidebar — and c (or
+        // Home) returns to the home view, the same destination as the
+        // "Reset View" button. The current class stays highlighted until the
+        // camera moves on. Keys are ignored while typing in a field (e.g.
+        // the filter box) or while a modifier is held, so browser shortcuts
+        // and normal typing keep working.
+        let navIndex = -1;
+        let navHighlight = null;
+
+        // A card counts as shown the same way updateStats does: not hidden
+        // by the filters and not inside a collapsed namespace group
+        function cardShown(card) {
+            const group = card.closest('.nsChildren');
+            return card.style.display !== 'none'
+                && !(group && group.style.display === 'none');
+        }
+
+        // Highlight the current class, clearing whichever one was current
+        function setNavHighlight(node) {
+            if (navHighlight && navHighlight !== node) setHighlight(navHighlight, false);
+            if (node) setHighlight(node, true);
+            navHighlight = node;
+        }
+
+        function navTo(dir) {
+            const cards = [...document.querySelectorAll('.classCard')].filter(cardShown);
+            if (!cards.length) return;
+            // A stale index (filters changed since the last step) re-anchors
+            // to the first / last shown class instead of a random middle one
+            if (navIndex < 0 || navIndex >= cards.length) {
+                navIndex = dir > 0 ? 0 : cards.length - 1;
+            } else {
+                navIndex = (navIndex + dir + cards.length) % cards.length;
+            }
+            const card = cards[navIndex];
+            const node = nodes.get(card.dataset.name);
+            if (!node) return;
+            setNavHighlight(node);
+            focusOn(node);
+            card.scrollIntoView({ block: 'nearest' });
+        }
+
+        function navCenter() {
+            setNavHighlight(null);
+            navIndex = -1;
+            resetView();
+        }
+
+        window.addEventListener('keydown', e => {
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            const tag = (e.target && e.target.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            if (e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') { e.preventDefault(); navTo(1); }
+            else if (e.key === 'p' || e.key === 'P' || e.key === 'ArrowLeft') { e.preventDefault(); navTo(-1); }
+            else if (e.key === 'c' || e.key === 'C' || e.key === 'Home') { e.preventDefault(); navCenter(); }
+        });
 
         // Restore the saved colour scheme (falling back to dark) and wire
         // up the selector
