@@ -5,6 +5,7 @@ add_executable(code_analyzer_tests
     gtest/main_test.cpp
     ${CMAKE_SOURCE_DIR}/src/uml/template_renderer.cpp
     gtest/registry_test.cpp
+    gtest/provider_test.cpp
     gtest/observer_test.cpp
     gtest/config_test.cpp
     gtest/uml_test.cpp

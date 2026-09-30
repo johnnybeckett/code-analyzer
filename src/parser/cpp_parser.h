@@ -18,13 +18,6 @@ public:
      */
     static std::vector<std::unique_ptr<Class>> parse_file(const std::string& file_path);
 
-    /**
-     * @brief Parse compile_commands.json
-     * @param compile_commands_path Path to compile_commands.json
-     * @return AnalysisResult containing parsed information
-     */
-    static AnalysisResult parse_compile_commands(const std::string& compile_commands_path);
-
 private:
     // Private constructor to prevent instantiation
     CppParser() = default;

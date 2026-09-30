@@ -2,6 +2,7 @@
 #include "core/config.h"
 #include "core/json_serializer.h"
 #include "core/parser_registry.h"
+#include "core/provider_registry.h"
 #include "core/report_visitor.h"
 #include "observers/analysis_observer.h"
 #include "observers/console_observer.h"
@@ -17,6 +18,11 @@
 void print_usage(const std::string& program_name) {
     std::cout << "Usage: " << program_name << " [options] <input_path>\n";
     std::cout << "Options:\n";
+    std::cout << "  --directory <root>          Recursively analyze the project rooted at\n";
+    std::cout << "                              <root>: every C++ source and header it\n";
+    std::cout << "                              finds. Same as passing <root> as\n";
+    std::cout << "                              <input_path>; listed here so the input\n";
+    std::cout << "                              modes are explicit as more are added.\n";
     std::cout << "  --compile-commands <path>   Analyze only the files listed in\n";
     std::cout << "                              compile_commands.json (the .cpp translation\n";
     std::cout << "                              units). Does NOT follow #include'd headers\n";
@@ -34,6 +40,7 @@ void print_usage(const std::string& program_name) {
     std::cout << "\n";
     std::cout << "Examples:\n";
     std::cout << "  " << program_name << " /path/to/project\n";
+    std::cout << "  " << program_name << " --directory /path/to/project\n";
     std::cout << "  " << program_name << " --json out.json /path/to/project\n";
     std::cout << "  " << program_name << " --compile-commands /path/to/compile_commands.json\n";
 }
@@ -56,12 +63,18 @@ int main(int argc, char* argv[]) {
     std::string json_output;
     std::string config_path;
 
-    // Parse command line arguments
-    for (int i = 1; i < argc - 1; ++i) {
+    // Parse command line arguments. The last argument is pre-seeded above as
+    // the positional input path, so it is scanned here too: a trailing -h or
+    // --help must still trigger the help path. Option flags landing at the
+    // final position simply fail their i + 1 < argc guard and fall through.
+    for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--compile-commands" && i + 1 < argc) {
             input_path = argv[++i];
             use_compile_commands = true;
+        } else if (arg == "--directory" && i + 1 < argc) {
+            input_path = argv[++i];
+            use_compile_commands = false;
         } else if (arg == "--json" && i + 1 < argc) {
             json_output = argv[++i];
         } else if (arg == "--config" && i + 1 < argc) {
@@ -84,17 +97,26 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        // Composition root: assemble the registry (which extension is parsed
-        // by which language, per config), the observer pipeline (what happens
-        // to events), and the analyzer that drives them all.
+        // Composition root: assemble the parser registry (which extension is
+        // parsed by which language, per config), the provider registry (which
+        // input mode supplies the file list), the observer pipeline (what
+        // happens to events), and the analyzer that drives them all.
         ParserRegistry registry = ParserRegistry::standard(config.source_extensions);
+        ProviderRegistry providers = ProviderRegistry::standard(config.skip_dirs);
         EventDispatcher dispatcher;
         dispatcher.add_observer(std::make_unique<ConsoleObserver>());
         Analyzer analyzer(config, registry, &dispatcher);
 
-        AnalysisResult result = use_compile_commands
-            ? analyzer.analyze_compile_commands(input_path)
-            : analyzer.analyze_project(input_path);
+        // The input mode selects the file provider; the analyzer itself is
+        // agnostic about where the files come from.
+        const std::string kind = use_compile_commands ? "compile-commands" : "directory";
+        auto provider = providers.create(kind, input_path);
+        if (!provider) {
+            std::cerr << "Error: unknown input mode \"" << kind << "\"\n";
+            return 1;
+        }
+
+        AnalysisResult result = analyzer.analyze(*provider);
 
         // Optionally write the full analysis to a JSON file
         if (!json_output.empty()) {

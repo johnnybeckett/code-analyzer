@@ -8,7 +8,6 @@
 #include <filesystem>
 #include <set>
 #include <iterator>
-#include <boost/json.hpp>
 
 namespace {
 
@@ -443,42 +442,4 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
     }
 
     return classes;
-}
-
-AnalysisResult CppParser::parse_compile_commands(const std::string& compile_commands_path) {
-    AnalysisResult result;
-
-    std::ifstream file(compile_commands_path);
-    if (!file.is_open()) {
-        std::cerr << "Unable to open compile_commands file: " << compile_commands_path << std::endl;
-        return result;
-    }
-
-    boost::system::error_code ec;
-    boost::json::value root = boost::json::parse(file, ec);
-    if (ec) {
-        std::cerr << "Error parsing compile_commands.json: " << ec.message() << std::endl;
-        return result;
-    }
-    if (!root.is_array()) {
-        std::cerr << "Error: compile_commands.json is not a JSON array" << std::endl;
-        return result;
-    }
-
-    // Parse each source file listed in the compilation database
-    for (const auto& entry : root.as_array()) {
-        std::string file_path;
-        if (entry.is_object() && entry.as_object().contains("file")
-            && entry.as_object().at("file").is_string()) {
-            file_path = entry.as_object().at("file").as_string();
-        }
-        if (file_path.empty()) continue;
-
-        std::cout << "Processing compile command for: " << file_path << std::endl;
-        for (auto& parsed_class : parse_file(file_path)) {
-            result.add_class(std::move(parsed_class));
-        }
-    }
-
-    return result;
 }

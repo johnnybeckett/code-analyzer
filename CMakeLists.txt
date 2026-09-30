@@ -20,6 +20,9 @@ find_package(Boost 1.71 REQUIRED COMPONENTS json)
 add_library(code_analyzer_core STATIC
     src/core/model.cpp
     src/core/analyzer.cpp
+    src/core/directory_provider.cpp
+    src/core/compile_commands_provider.cpp
+    src/core/provider_registry.cpp
     src/core/parser_registry.cpp
     src/core/config.cpp
     src/core/report_visitor.cpp
