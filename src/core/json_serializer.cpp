@@ -43,6 +43,7 @@ boost::json::value serialize(const AnalysisResult& result, const std::string& in
         cj["namespace"] = class_obj->full_namespace;
         cj["visibility"] = visibility_name(class_obj->visibility);
         cj["static"] = class_obj->is_static;
+        cj["file"] = class_obj->file;
 
         json::array inheritance;
         for (const auto& base : class_obj->inheritance_list) {

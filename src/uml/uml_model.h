@@ -42,6 +42,17 @@ public:
      */
     std::string build_html() const;
 
+    /**
+     * @brief The distinct source files the classes in this model were parsed
+     *        from, in first-seen (document) order.
+     *
+     * The union over every input file (files[0] before files[1] in diff mode),
+     * deduped. This is the allowlist a server preloads so it can serve the
+     * real source of any class on demand. Fail-soft: a missing or malformed
+     * input file contributes nothing rather than throwing.
+     */
+    std::vector<std::string> source_files() const;
+
 private:
     std::vector<std::string> files_;
     // Accepted for CLI parity with the generator, but deliberately not applied

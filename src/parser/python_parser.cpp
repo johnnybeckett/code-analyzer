@@ -34,6 +34,7 @@ std::unique_ptr<Class> PythonParser::parse_file(const std::string& file_path) {
         // Create the class with proper namespace handling
         auto parsed_class = std::make_unique<Class>(class_name, "");
         parsed_class->kind = "class";  // Python types are always classes
+        parsed_class->file = file_path;
 
         // Extract inheritance information if present. Each comma-separated
         // token is trimmed, and keyword arguments such as

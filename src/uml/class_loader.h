@@ -35,6 +35,21 @@ public:
     static std::vector<std::string> parseFileClassesStrict(const std::string& filename);
 
     /**
+     * @brief Collect the distinct source files referenced by the classes in one
+     *        analyzer JSON file, in first-seen (document) order.
+     *
+     * Fail-soft (like parseFileClasses): returns an empty vector on a missing
+     * file, a malformed document, or a missing "classes" array — with no
+     * warning, since an absent "file" simply means nothing to serve. Each
+     * class's non-empty "file" string contributes one entry; duplicates are
+     * dropped, first-seen order preserved.
+     *
+     * @param filename Path to a single analyzer JSON file
+     * @return Distinct, non-empty "file" strings in first-seen order (may be empty)
+     */
+    static std::vector<std::string> parseFileSources(const std::string& filename);
+
+    /**
      * @brief Convert class data to a JSON string for JavaScript
      * @param class_data Vector of class data strings
      * @return JSON string representation

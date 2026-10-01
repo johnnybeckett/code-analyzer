@@ -414,6 +414,7 @@ std::vector<std::unique_ptr<Class>> CppParser::parse_file(const std::string& fil
 
         auto parsed_class = std::make_unique<Class>(class_name, namespace_path);
         parsed_class->kind = kind;
+        parsed_class->file = file_path;
 
         // Extract base classes from the base clause, normalising each to a
         // canonical name (access specifiers and a leading `::` are dropped,

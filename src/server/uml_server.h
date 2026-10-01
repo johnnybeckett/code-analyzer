@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 
 #include <cstdint>
+#include <map>
 #include <string>
 
 namespace server {
@@ -11,11 +12,19 @@ namespace server {
 /**
  * @brief A minimal Boost.Beast HTTP server that serves the UML model page.
  *
- * Single responsibility: serve the fully-built UML viewer HTML (received as an
- * opaque body string) over HTTP — any path, every GET — and nothing else. It
- * knows nothing about *how* the page was built (that is UmlModel's job); it
+ * Serves two things, and nothing else:
+ *   - the fully-built UML viewer HTML (received as an opaque body string) on
+ *     any other GET, and
+ *   - `GET /source?path=...` — the raw source of a class, looked up exactly
+ *     (percent-decoded) against the allowlist of source files it was handed.
+ *
+ * It knows nothing about *how* the page was built (that is UmlModel's job); it
  * simply returns the bytes it was handed. This keeps the server reusable and
  * isolates all the HTTP/Beast detail in one place.
+ *
+ * The `/source` route is an allowlist, not a filesystem: `path` is matched
+ * against the preloaded source map, never used to build a path, so the query
+ * cannot escape the set of files the caller chose to expose.
  *
  * It runs a single-threaded, async io_context that can serve many concurrent
  * clients, but each connection is deliberately simple request/response with
@@ -26,6 +35,9 @@ public:
     /**
      * @brief Bind and prepare the listener.
      * @param body The complete HTML page to serve (built by UmlModel).
+     * @param sources Allowlisted class source files (path -> content) that
+     *        `GET /source?path=...` may return. Only exact matches of a key are
+     *        served; everything else on that route is a 404.
      * @param port TCP port to bind on 0.0.0.0; 0 lets the OS pick an ephemeral
      *             port (read it back via local_port() — used by the tests).
      *
@@ -35,7 +47,9 @@ public:
      *         port is already in use), so a bad port is reported up front rather
      *         than mid-run.
      */
-    UmlServer(std::string body, std::uint16_t port);
+    UmlServer(std::string body,
+              std::map<std::string, std::string> sources,
+              std::uint16_t port);
 
     ~UmlServer();
 
@@ -61,6 +75,7 @@ private:
     void do_accept();
 
     std::string body_;
+    std::map<std::string, std::string> sources_;
     boost::asio::io_context io_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::uint16_t assigned_port_{0};

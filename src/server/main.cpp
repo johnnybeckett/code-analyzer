@@ -4,10 +4,13 @@
 #include <arpa/inet.h>
 #include <csignal>
 #include <cstdlib>
+#include <fstream>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <iostream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -121,7 +124,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    server::UmlServer srv(std::move(body), static_cast<std::uint16_t>(port));
+    // Preload the allowlisted class source files so `GET /source?path=...` can
+    // return them by exact lookup — the server never builds a path from a query.
+    std::map<std::string, std::string> sources;
+    for (const auto& path : model.source_files()) {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            std::cerr << "Warning: source file not found; /source will 404 for "
+                      << path << "\n";
+            continue;
+        }
+        std::ostringstream data;
+        data << in.rdbuf();
+        sources.emplace(path, data.str());
+    }
+
+    server::UmlServer srv(std::move(body), std::move(sources),
+                          static_cast<std::uint16_t>(port));
     const unsigned int bound_port = srv.local_port();
 
     // Clean shutdown on Ctrl-C / SIGTERM.

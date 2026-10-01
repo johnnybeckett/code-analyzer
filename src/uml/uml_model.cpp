@@ -1,6 +1,7 @@
 #include "uml/uml_model.h"
 
 #include "uml/class_loader.h"
+#include <set>
 #include <utility>
 
 namespace uml {
@@ -39,6 +40,19 @@ std::string UmlModel::build_html() const {
         { "__OLD_CLASSES_JSON__", old_json },
         { "__NEW_CLASSES_JSON__", new_json },
     });
+}
+
+std::vector<std::string> UmlModel::source_files() const {
+    std::vector<std::string> out;
+    std::set<std::string> seen;
+    for (const auto& f : files_) {
+        for (const auto& src : JsonClassLoader::parseFileSources(f)) {
+            if (seen.insert(src).second) {
+                out.push_back(src);
+            }
+        }
+    }
+    return out;
 }
 
 }  // namespace uml

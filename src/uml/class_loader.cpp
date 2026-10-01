@@ -3,6 +3,7 @@
 #include <boost/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -65,6 +66,42 @@ std::vector<std::string> JsonClassLoader::parseFileClassesStrict(const std::stri
     }
 
     return class_data;
+}
+
+std::vector<std::string> JsonClassLoader::parseFileSources(const std::string& filename) {
+    std::vector<std::string> sources;
+    std::set<std::string> seen;
+    namespace json = boost::json;
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        return sources;
+    }
+
+    boost::system::error_code ec;
+    json::value root = json::parse(file, ec);
+    if (ec) {
+        return sources;
+    }
+
+    if (!root.is_object() || !root.as_object().contains("classes")
+        || !root.as_object().at("classes").is_array()) {
+        return sources;
+    }
+
+    for (const auto& cls : root.as_object().at("classes").as_array()) {
+        if (!cls.is_object() || !cls.as_object().contains("file")) continue;
+        const auto& f = cls.as_object().at("file");
+        if (!f.is_string()) continue;
+        const auto s = f.as_string();
+        const std::string path(s.data(), s.size());
+        if (path.empty()) continue;
+        if (seen.insert(path).second) {
+            sources.push_back(path);
+        }
+    }
+
+    return sources;
 }
 
 std::string JsonClassLoader::getClassesJSON(const std::vector<std::string>& class_data) {

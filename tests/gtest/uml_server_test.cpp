@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <map>
 #include <string>
 
 namespace {
@@ -80,6 +81,15 @@ int status_of(const std::string& response) {
     return std::stoi(response.substr(sp1 + 1, sp2 - sp1 - 1));
 }
 
+// The message body: everything after the blank line separating headers from body.
+std::string body_of(const std::string& response) {
+    const std::size_t sep = response.find("\r\n\r\n");
+    if (sep == std::string::npos) {
+        return {};
+    }
+    return response.substr(sep + 4);
+}
+
 }  // namespace
 
 TEST(UmlServerTest, ServesSplicedBodyAnd405sNonGet) {
@@ -87,7 +97,7 @@ TEST(UmlServerTest, ServesSplicedBodyAnd405sNonGet) {
     // uml_model_test); this test isolates the server's request/response behavior.
     const std::string body = "<!DOCTYPE html><html><body>SPLICE_MARKER_XYZ</body></html>";
 
-    server::UmlServer srv(body, 0);  // port 0 -> OS-assigned ephemeral port
+    server::UmlServer srv(body, {}, 0);  // port 0 -> OS-assigned ephemeral port
     const unsigned short port = srv.local_port();
     ASSERT_NE(port, 0);
 
@@ -111,6 +121,56 @@ TEST(UmlServerTest, ServesSplicedBodyAnd405sNonGet) {
     // Non-GET methods -> 405.
     EXPECT_EQ(status_of(raw_request(port, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\nok")), 405);
     EXPECT_EQ(status_of(raw_request(port, "HEAD / HTTP/1.1\r\nHost: x\r\n\r\n")), 405);
+
+    srv.stop();
+    worker.join();
+}
+
+TEST(UmlServerTest, SourceRoute_AllowlistedServedEverythingElse404s) {
+    // A real-looking allowlisted source file (path -> content) is handed in at
+    // construction; the route may return it by exact match and nothing else.
+    const std::string body = "<!DOCTYPE html><html><body>PAGE</body></html>";
+    const std::map<std::string, std::string> sources{{"/src/a.cpp", "int x = 1;"}};
+
+    server::UmlServer srv(body, sources, 0);
+    const unsigned short port = srv.local_port();
+    ASSERT_NE(port, 0);
+
+    std::thread worker{[&] { srv.run(); }};
+
+    std::string resp;
+    for (int i = 0; i < 50 && status_of(resp) == -1; ++i) {
+        resp = raw_request(port, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_EQ(status_of(resp), 200);
+
+    // Allowlisted path -> 200, the exact stored content, plain-text type.
+    resp = raw_request(port, "GET /source?path=/src/a.cpp HTTP/1.1\r\nHost: x\r\n\r\n");
+    EXPECT_EQ(status_of(resp), 200);
+    EXPECT_EQ(body_of(resp), "int x = 1;");
+    EXPECT_NE(resp.find("text/plain; charset=utf-8"), std::string::npos);
+
+    // Percent-encoded (what the pane sends via encodeURIComponent).
+    resp = raw_request(port, "GET /source?path=%2Fsrc%2Fa.cpp HTTP/1.1\r\nHost: x\r\n\r\n");
+    EXPECT_EQ(status_of(resp), 200);
+    EXPECT_EQ(body_of(resp), "int x = 1;");
+
+    // Not in the allowlist -> 404; the server never reads the filesystem.
+    EXPECT_EQ(status_of(raw_request(port,
+                                    "GET /source?path=/etc/passwd HTTP/1.1\r\nHost: x\r\n\r\n")), 404);
+
+    // No path= param at all -> 404.
+    EXPECT_EQ(status_of(raw_request(port, "GET /source HTTP/1.1\r\nHost: x\r\n\r\n")), 404);
+
+    // A longer param that merely contains "path=" must not match.
+    EXPECT_EQ(status_of(raw_request(port,
+                                    "GET /source?xpath=/src/a.cpp HTTP/1.1\r\nHost: x\r\n\r\n")), 404);
+
+    // Non-GET on the route -> 405.
+    EXPECT_EQ(status_of(raw_request(port,
+                                    "POST /source?path=/src/a.cpp HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n\r\nok")),
+              405);
 
     srv.stop();
     worker.join();

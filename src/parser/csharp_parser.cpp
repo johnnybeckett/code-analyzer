@@ -110,6 +110,7 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
         // Create the class object
         auto type = std::make_unique<Class>(class_name, namespace_path);
         type->kind = kind;
+        type->file = file_path;
 
         // Parse inheritance if exists
         if (!base_classes.empty()) {

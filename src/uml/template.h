@@ -38,6 +38,15 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             --nm: #fbbf24;
             --badge-vis-bg: #334155;
             --badge-vis-fg: #cbd5e1;
+            /* Source-pane syntax colours, referenced by the .syn-* spans so
+               the highlighter tracks the theme without any JS logic */
+            --syn-keyword: #c792ea;
+            --syn-type: #82aaff;
+            --syn-string: #c3e88d;
+            --syn-comment: #5b7086;
+            --syn-number: #f78c6c;
+            --syn-text: #e2e8f0;
+            --pane-h: 33vh;   /* source-pane height; the drag handle retunes it */
         }
         body[data-theme="light"] {
             --bg: #eef2f7;
@@ -54,6 +63,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             --nm: #b45309;
             --badge-vis-bg: #cbd5e1;
             --badge-vis-fg: #0f172a;
+            --syn-keyword: #7c3aed;
+            --syn-type: #1d4ed8;
+            --syn-string: #15803d;
+            --syn-comment: #7d8fa5;
+            --syn-number: #b45309;
+            --syn-text: #0f172a;
         }
         /* Vim "darkblue": Blue2 background, gray85 text, LightSkyBlue accents */
         body[data-theme="blue"] {
@@ -71,6 +86,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             --nm: #ffd97d;
             --badge-vis-bg: #2c2cc0;
             --badge-vis-fg: #c9d4ff;
+            --syn-keyword: #d3b6ff;
+            --syn-type: #87cefa;
+            --syn-string: #98fb98;
+            --syn-comment: #8f97e8;
+            --syn-number: #ffd97d;
+            --syn-text: #d9d9d9;
         }
         body {
             margin: 0;
@@ -80,12 +101,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
         #scene {
             position: absolute;
-            top: 0; left: 0; bottom: 0;
+            top: 0; left: 0; bottom: var(--pane-h);
             right: 380px;
         }
         #sidebar {
             position: absolute;
-            top: 0; right: 0; bottom: 0;
+            top: 0; right: 0; bottom: var(--pane-h);
             width: 380px;
             overflow-y: auto;
             background: var(--panel);
@@ -236,6 +257,111 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             border-radius: 8px;
             padding: 8px;
         }
+        /* Source pane: a resizable band across the bottom of the window that
+           shows the focused class and the source files that implement it.
+           Its height is the --pane-h custom property, retuned by the drag handle. */
+        #source-pane {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            height: var(--pane-h);
+            background: var(--panel);
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            z-index: 5;
+        }
+        /* The thin drag bar at the pane's top edge; grab it to resize. */
+        #pane-handle {
+            flex: 0 0 auto;
+            height: 8px;
+            margin-top: -1px;
+            cursor: ns-resize;
+            background: transparent;
+            position: relative;
+        }
+        #pane-handle::after {
+            content: "";
+            position: absolute;
+            left: 50%; top: 50%;
+            width: 44px; height: 3px;
+            transform: translate(-50%, -50%);
+            border-radius: 2px;
+            background: var(--border);
+        }
+        #pane-head {
+            flex: 0 0 auto;
+            padding: 4px 14px 6px;
+            border-bottom: 1px solid var(--border);
+        }
+        #pane-title {
+            font-size: 15px;
+            font-weight: 600;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        }
+        #pane-vars {
+            margin-top: 3px;
+            font-size: 12px;
+            color: var(--muted);
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            line-height: 1.5;
+        }
+        .pane-var {
+            margin-right: 14px;
+            white-space: nowrap;
+        }
+        .pane-var a {
+            color: var(--syn-type);
+            text-decoration: underline dotted;
+            cursor: pointer;
+        }
+        .pane-var a:hover { color: var(--syn-keyword); }
+        #pane-tabs {
+            flex: 0 0 auto;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 6px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .pane-tab {
+            padding: 3px 10px;
+            font-size: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            color: var(--text);
+            background: var(--bg);
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .pane-tab:hover { border-color: var(--accent); }
+        .pane-tab.active {
+            border-color: var(--accent);
+            background: var(--accent);
+            color: var(--accent-contrast, #fff);
+        }
+        /* The code body: a scrollable monospace area with the highlighted source. */
+        #pane-code {
+            flex: 1 1 auto;
+            overflow: auto;
+            margin: 0;
+            padding: 10px 14px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            font-size: 12.5px;
+            line-height: 1.55;
+            white-space: pre;
+            tab-size: 4;
+            color: var(--syn-text);
+            background: var(--bg);
+        }
+        #pane-code .syn-keyword { color: var(--syn-keyword); }
+        #pane-code .syn-type { color: var(--syn-type); }
+        #pane-code .syn-string { color: var(--syn-string); }
+        #pane-code .syn-comment { color: var(--syn-comment); font-style: italic; }
+        #pane-code .syn-number { color: var(--syn-number); }
+        #pane-code .syn-placeholder { color: var(--muted); font-style: italic; }
     </style>
 </head>
 <body>
@@ -313,6 +439,16 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         </div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
+
+    <div id="source-pane">
+        <div id="pane-handle" title="Drag to resize the source pane"></div>
+        <div id="pane-head">
+            <div id="pane-title">No class focused</div>
+            <div id="pane-vars"></div>
+        </div>
+        <div id="pane-tabs"></div>
+        <pre id="pane-code"><span class="syn-placeholder">double-click a class to show its source here</span></pre>
+    </div>
 
     <script>
         // Class data produced by the code analyzer.
@@ -1303,7 +1439,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                        % (2 * Math.PI) - Math.PI;
         }
 
-        function focusOn(n) {
+        function focusOnImpl(n) {
             autoRotate = false;
             pinned.clear();
             pinned.add(n);
@@ -1318,7 +1454,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             focus.active = true;
         }
 
-        function resetView() {
+        function resetViewImpl() {
             pinned.clear();
             wrapYaw();
             Object.assign(focus, homeView());
@@ -1643,6 +1779,13 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         window.addEventListener('keydown', e => {
+            // Ctrl-Z / Cmd-Z: step backwards through the focus history. Handled
+            // first (before the modifier early-return below) so it always fires.
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+                e.preventDefault();
+                histBack();
+                return;
+            }
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             const tag = (e.target && e.target.tagName) || '';
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -1710,6 +1853,225 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             const minimized = controls.classList.toggle('minimized');
             minimizeBtn.innerHTML = minimized ? '+' : '&ndash;';
             minimizeBtn.title = minimized ? 'Expand panel' : 'Minimize panel';
+        });
+
+        // ------------------------------------------------------------------
+        // Source pane
+        // Shows the focused class and the source files that implement it, as
+        // tabs. Source is fetched from the server on demand (GET /source?
+        // path=...); a page opened from a file:// URL cannot fetch, so those
+        // tabs fall back to a "source not available" placeholder.
+        // ------------------------------------------------------------------
+        const paneEl = {
+            title:  document.getElementById('pane-title'),
+            vars:   document.getElementById('pane-vars'),
+            tabs:   document.getElementById('pane-tabs'),
+            code:   document.getElementById('pane-code'),
+        };
+        let activePath = null;   // the tab whose fetch is in flight / shown
+        let curFiles = [];       // tab order for the focused class
+
+        // --- Focus history: newest last, capped at 30; Ctrl-Z steps back ---
+        const hist = [];
+        function pushHistory(n) {
+            hist.push(n);
+            if (hist.length > 30) hist.shift();
+        }
+        // Public focusOn: record the target, focus it, refresh the pane. All
+        // existing callers (double-click, navigation, sidebar) route through
+        // this, so every focus is a history entry Ctrl-Z can walk back over.
+        function focusOn(n) {
+            pushHistory(n);
+            focusOnImpl(n);
+            updatePane(n);
+        }
+        // Step back one entry (never past the oldest), re-focus it, refresh.
+        function histBack() {
+            if (hist.length > 1) {
+                hist.pop();
+                const n = hist[hist.length - 1];
+                focusOnImpl(n);
+                updatePane(n);
+            }
+        }
+        // Camera reset (button / "c" key) — leaves history and pane alone.
+        function resetView() { resetViewImpl(); }
+
+        // --- Tabs: own file first, then related classes' files, cap 8 -----
+        // Candidate files are the focused class's own file, its base classes'
+        // files, and the files of classes named by member/parameter/return
+        // types. Each is counted by how many references point at it, so the
+        // most-central files surface first.
+        function relatedFiles(n) {
+            const c = n.cls;
+            const count = new Map();
+            const add = p => { if (p) count.set(p, (count.get(p) || 0) + 1); };
+            add(c.file);
+            for (const b of (c.inheritance || [])) {
+                const base = resolveBase(b);
+                if (base && base !== c) add(base.file);
+            }
+            const refFile = t => {
+                const id = classInType(t);
+                if (!id) return;
+                const nd = nodes.get(id);
+                if (nd && nd.cls && nd.cls !== c) add(nd.cls.file);
+            };
+            for (const v of (c.variables || [])) refFile(v.type);
+            for (const m of (c.methods || [])) {
+                refFile(m.return_type);
+                for (const p of (m.parameters || [])) refFile(p);
+            }
+            const own = c.file;
+            return [...count.entries()]
+                .filter(e => e[0])
+                .sort((a, b) => {
+                    const ao = (a[0] === own) ? 0 : 1;
+                    const bo = (b[0] === own) ? 0 : 1;
+                    if (ao !== bo) return ao - bo;   // own file always first
+                    return b[1] - a[1];              // then most-referenced
+                })
+                .slice(0, 8)
+                .map(e => e[0]);
+        }
+
+        // --- Highlighter: no CDN, colors from the theme's --syn-* tokens ---
+        // C++/C#/Python keyword union; leading-uppercase identifiers read as
+        // types; comment/string/number spans for the rest.
+        const SYN_KEYWORDS = new Set(('abstract as auto bool break case catch char class const constexpr '
+            + 'continue default def delete do double elif else enum except export extends extern '
+            + 'final finally float for friend from function global if import inline int '
+            + 'interface internal lambda let long match mutable namespace new noexcept '
+            + 'nullptr operator override package pass private protected public readonly '
+            + 'record return sealed short signed sizeof static struct string switch '
+            + 'template this throw throws try typedef typename type union unsigned using '
+            + 'var virtual void volatile where while with yield').split(' '));
+        const SYN_RE = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)|("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|([A-Za-z_][A-Za-z0-9_]*)|(\d[\dxXa-fA-F'_.eE]*)/g;
+        function highlight(code) {
+            if (typeof code !== 'string') code = String(code);
+            if (!code) return '';
+            // Size guard: tokenizing a very large file would freeze the pane;
+            // render the (escaped) plain text instead.
+            if (code.length > 300000) return esc(code);
+            let out = '';
+            let last = 0;
+            let m;
+            SYN_RE.lastIndex = 0;
+            while ((m = SYN_RE.exec(code)) !== null) {
+                out += esc(code.slice(last, m.index));
+                last = SYN_RE.lastIndex;
+                if (m[1] !== undefined) out += '<span class="syn-comment">' + esc(m[1]) + '</span>';
+                else if (m[2] !== undefined) out += '<span class="syn-string">' + esc(m[2]) + '</span>';
+                else if (m[3] !== undefined) {
+                    if (SYN_KEYWORDS.has(m[3])) out += '<span class="syn-keyword">' + esc(m[3]) + '</span>';
+                    else if (/^[A-Z]/.test(m[3])) out += '<span class="syn-type">' + esc(m[3]) + '</span>';
+                    else out += esc(m[3]);
+                } else if (m[4] !== undefined) out += '<span class="syn-number">' + esc(m[4]) + '</span>';
+            }
+            out += esc(code.slice(last));
+            return out;
+        }
+
+        // --- Fetch + render a tab -----------------------------------------
+        function setPlaceholder(msg) {
+            paneEl.code.innerHTML = '<span class="syn-placeholder">' + esc(msg) + '</span>';
+        }
+        function openTab(path) {
+            activePath = path;
+            const idx = curFiles.indexOf(path);
+            [...paneEl.tabs.children].forEach((t, i) => t.classList.toggle('active', i === idx));
+            paneEl.code.textContent = 'Loading ' + path + ' …';
+            fetch('/source?path=' + encodeURIComponent(path))
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                .then(text => {
+                    if (activePath !== path) return;   // superseded by a newer tab
+                    paneEl.code.innerHTML = highlight(text);
+                })
+                .catch(() => {
+                    if (activePath !== path) return;
+                    setPlaceholder('source not available for ' + path);
+                });
+        }
+
+        // --- Focused class: title, clickable member types, tabs ------------
+        function updatePane(n) {
+            const c = n.cls;
+            if (!c) {
+                // External stub: no class record, hence no source file.
+                paneEl.title.textContent = n.name;
+                paneEl.vars.textContent = '';
+                paneEl.tabs.innerHTML = '';
+                curFiles = [];
+                activePath = null;
+                setPlaceholder('external class — no source file in this model');
+                return;
+            }
+            paneEl.title.textContent = displayName(c);
+
+            // Member variables; a type that names a class in the model is a
+            // clickable link that focuses that class (and records it in the
+            // history, so Ctrl-Z comes straight back here).
+            const vars = c.variables || [];
+            if (vars.length) {
+                paneEl.vars.innerHTML = vars.map(v => {
+                    const type = String(v.type || '').trim();
+                    const target = classInType(type);
+                    const tn = target ? nodes.get(target) : null;
+                    const label = esc(type);
+                    const inner = target
+                        ? '<a data-target="' + esc(target) + '" title="Focus ' + esc(tn.cls ? displayName(tn.cls) : target) + '">' + label + '</a>'
+                        : label;
+                    return '<span class="pane-var">' + inner + ' ' + esc(v.name) + '</span>';
+                }).join('');
+                paneEl.vars.querySelectorAll('a[data-target]').forEach(a => {
+                    a.addEventListener('click', () => {
+                        const t = a.getAttribute('data-target');
+                        if (t && nodes.has(t)) focusOn(nodes.get(t));
+                    });
+                });
+            } else {
+                paneEl.vars.textContent = '';
+            }
+
+            // Tabs for this class's source files, own file first; open it.
+            curFiles = relatedFiles(n);
+            activePath = null;
+            paneEl.tabs.innerHTML = '';
+            for (const path of curFiles) {
+                const tab = document.createElement('span');
+                tab.className = 'pane-tab';
+                const segs = String(path).split('/');
+                tab.textContent = segs[segs.length - 1] || path;
+                tab.title = path;
+                tab.addEventListener('click', () => openTab(path));
+                paneEl.tabs.appendChild(tab);
+            }
+            if (curFiles.length) openTab(curFiles[0]);
+            else setPlaceholder('no source file recorded for this class');
+        }
+
+        // --- Drag the top handle to resize the pane (clamped 15%–80%) ------
+        let paneDragging = false;
+        document.getElementById('pane-handle').addEventListener('mousedown', e => {
+            paneDragging = true;
+            e.preventDefault();
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'ns-resize';
+        });
+        window.addEventListener('mousemove', e => {
+            if (!paneDragging) return;
+            const h = window.innerHeight;
+            if (!h) return;
+            let pct = ((h - e.clientY) / h) * 100;
+            pct = Math.max(15, Math.min(80, pct));
+            document.documentElement.style.setProperty('--pane-h', pct + 'vh');
+            window.dispatchEvent(new Event('resize'));   // three.js re-measures
+        });
+        window.addEventListener('mouseup', () => {
+            if (!paneDragging) return;
+            paneDragging = false;
+            document.body.style.userSelect = '';
+            document.body.style.cursor = '';
         });
     </script>
 </body>

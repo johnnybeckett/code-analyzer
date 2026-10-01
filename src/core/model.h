@@ -54,6 +54,11 @@ public:
      *        (defaults to "class")
      */
     std::string kind = "class";
+    /**
+     * @brief Source file this class was parsed from (empty when unknown).
+     *        Populated by the parsers; used by the UML viewer to fetch source.
+     */
+    std::string file;
     std::vector<std::string> inheritance_list;
     std::vector<std::unique_ptr<Method>> methods;
     std::vector<std::unique_ptr<Variable>> variables;
