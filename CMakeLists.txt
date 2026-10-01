@@ -40,12 +40,28 @@ add_executable(${PROJECT_NAME}
     src/main.cpp
 )
 
-# Add UML generator executable (template.h carries the embedded HTML/JS page)
+# UML model library: class loading + template splicing + the shared UmlModel
+# facade. Consumed by both the file-based generator and the HTTP server, so the
+# "files -> spliced HTML" logic lives in one place. (template.h carries the
+# embedded HTML/JS page.)
+add_library(code_analyzer_uml STATIC
+    src/uml/class_loader.cpp
+    src/uml/template_renderer.cpp
+    src/uml/uml_model.cpp
+)
+
+# Add UML generator executable (thin entry point over the UML model library)
 add_executable(UMLGenerator
     src/uml/main.cpp
     src/uml/uml_generator.cpp
-    src/uml/class_loader.cpp
-    src/uml/template_renderer.cpp
+)
+
+# UML model HTTP server (thin entry point + Boost.Beast handler over the model
+# library). Boost.Beast/Asio are header-only and reach us transitively via
+# Boost::json's include dir; Asio's thread support needs Threads at link time.
+add_executable(UmlServer
+    src/server/main.cpp
+    src/server/uml_server.cpp
 )
 
 # Add documentation generator executable
@@ -63,8 +79,17 @@ target_link_libraries(code_analyzer_core PUBLIC
     Threads::Threads
 )
 
-target_include_directories(UMLGenerator PRIVATE
+# UML library: single include root (src/) so headers are addressed as
+# uml/uml_model.h, etc. Boost::json propagates to every consumer; its include
+# dir (/usr/include) is also where the header-only Boost.Beast and Boost.Asio
+# headers live, so a consumer that compiles them (the HTTP server) picks them
+# up transitively — no separate find_package component is available for them.
+target_include_directories(code_analyzer_uml PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(code_analyzer_uml PUBLIC
+    Boost::json
+    Threads::Threads
 )
 
 # Production binary: links only the core library (no test framework).
@@ -72,10 +97,15 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     code_analyzer_core
 )
 
-# Link libraries for UML generator
+# UML generator: thin entry point; the model/splice logic comes from the library.
 target_link_libraries(UMLGenerator
+    code_analyzer_uml
+)
+
+# UML server: model page from the library; Asio's thread support needs Threads.
+target_link_libraries(UmlServer
+    code_analyzer_uml
     Threads::Threads
-    Boost::json
 )
 
 # Enable testing

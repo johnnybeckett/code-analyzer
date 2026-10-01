@@ -1,20 +1,17 @@
 #include "uml/uml_generator.h"
 
-#include "uml/class_loader.h"
 #include <fstream>
 #include <iostream>
-#include <utility>
 
 namespace uml {
 
 UmlGenerator::UmlGenerator(const std::vector<std::string>& files,
                            const std::vector<std::string>& hide_patterns)
-    : input_files(files), hidden_classes_regex(hide_patterns),
-      diff_mode(files.size() >= 2) {}
+    : model_(files, hide_patterns) {}
 
 bool UmlGenerator::generate() {
     try {
-        // Generate HTML with 3D visualization
+        // Build the page through the shared UmlModel facade.
         std::string html_content = generateHTML();
 
         // Write to output file
@@ -36,29 +33,7 @@ bool UmlGenerator::generate() {
 }
 
 std::string UmlGenerator::generateHTML() const {
-    // Splice the real class data into the template.
-    //   - single file: one merged class set, diff off
-    //   - two files:   old (files[0]) and new (files[1]), diff on
-    std::string old_json, new_json;
-    const bool diff = diff_mode && input_files.size() >= 2;
-    if (diff) {
-        old_json = JsonClassLoader::getClassesJSON(JsonClassLoader::parseFileClasses(input_files[0]));
-        new_json = JsonClassLoader::getClassesJSON(JsonClassLoader::parseFileClasses(input_files[1]));
-    } else {
-        std::vector<std::string> all;
-        for (const auto& f : input_files) {
-            const auto c = JsonClassLoader::parseFileClasses(f);
-            all.insert(all.end(), c.begin(), c.end());
-        }
-        old_json = "[]";
-        new_json = JsonClassLoader::getClassesJSON(all);
-    }
-
-    return renderer.render({
-        { "__DIFF_MODE__",       diff ? "true" : "false" },
-        { "__OLD_CLASSES_JSON__", old_json },
-        { "__NEW_CLASSES_JSON__", new_json },
-    });
+    return model_.build_html();
 }
 
 }  // namespace uml

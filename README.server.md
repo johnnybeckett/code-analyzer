@@ -1,0 +1,103 @@
+# UML Model Server
+
+An HTTP server that serves the UML "model" — the same self-contained, interactive 3D
+class-diagram page the generator produces — over HTTP, instead of writing it to a file.
+It is written with **Boost.Beast** and takes the same input arguments as the generator,
+plus a `--port`.
+
+## Features
+
+- **Serves the UML model over HTTP**: any `GET` request returns the full, self-contained
+  viewer page (embedded three.js, no external assets)
+- **Diff mode**: pass two JSON files to serve the older/newer comparison (added in green,
+  removed in red) — exactly as the generator renders it
+- **Same CLI as the generator**: `--hide <regex>` and the positional input files work
+  identically, plus a new `--port`
+- **Binds all interfaces** (`0.0.0.0`) and prints a LAN URL on startup
+- **Fail-fast**: the page is built *before* the port is bound, so a bad input file never
+  leaves a half-configured server listening
+
+## Building
+
+The server is built as part of the main project. To build everything:
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+```
+
+This creates the UML model server (`UmlServer`) alongside the code analyzer (`CodeAnalyzer`)
+and the file-based UML generator (`UMLGenerator`).
+
+## Usage
+
+### Basic Usage
+
+```bash
+# Serve a single analyzer JSON file on the default port (8000)
+./UmlServer data.json
+
+# Choose a port
+./UmlServer --port 9000 data.json
+
+# Serve a diff (older newer) on a chosen port
+./UmlServer --port 9000 older.json newer.json
+```
+
+### Options
+
+- `--port <n>`: TCP port to listen on (default `8000`; must be `1..65535`)
+- `--hide <regex>`: Hide classes matching the specified regex pattern
+- `-h, --help`: Show help message
+
+### Input files
+
+- **One file** → a single combined diagram.
+- **Two files** → diff mode, in `older newer` order (added green, removed red).
+- **More than two** → diff uses the first two; the rest are ignored (a warning is printed).
+
+## Accessing
+
+On startup the server prints the URLs to open:
+
+```
+Serving the UML model on port 8000 (all interfaces).
+  Local:    http://localhost:8000/
+  Network:  http://192.168.1.42:8000/
+Press Ctrl-C to stop.
+```
+
+Open either URL in a browser, or fetch the page directly:
+
+```bash
+curl -sI http://localhost:8000/
+# HTTP/1.1 200 OK
+# Content-Type: text/html; charset=utf-8
+# Content-Length: ...
+
+# Diff mode: the served page contains the spliced old/new class data
+curl -s http://localhost:9000/ | grep -o 'const DIFF_MODE = [a-z]*;'
+# const DIFF_MODE = true;
+```
+
+Every path is served the same page (`GET /anything` also returns the model). Non-`GET`
+methods (e.g. `POST`, `HEAD`) are rejected with `405`.
+
+## Visualization Features
+
+The served page is the same interactive viewer described in [README.uml.md](README.uml.md):
+3D navigation (rotate/zoom/pan), regex filtering in the browser, and a legend for classes,
+inheritance, and method/variable connections.
+
+## Example
+
+```bash
+# 1. Run the code analyzer to produce JSON output
+./CodeAnalyzer /path/to/project > analysis.json
+
+# 2. Serve the UML model over HTTP
+./UmlServer --port 8000 analysis.json
+
+# 3. Open http://localhost:8000/ in a browser
+```

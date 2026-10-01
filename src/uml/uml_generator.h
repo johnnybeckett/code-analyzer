@@ -3,7 +3,8 @@
 
 #include <string>
 #include <vector>
-#include "uml/template_renderer.h"
+
+#include "uml/uml_model.h"
 
 namespace uml {
 
@@ -19,6 +20,9 @@ namespace uml {
  * - 3D rotation, zooming, and panning of the class diagram
  * - Filtering classes by name or regex pattern
  * - A side panel listing every class with its methods and member variables
+ *
+ * The page itself is built by the shared UmlModel facade (the same one the
+ * HTTP server serves); this class only writes it to a file.
  */
 class UmlGenerator {
 public:
@@ -47,14 +51,7 @@ private:
      */
     std::string generateHTML() const;
 
-    std::vector<std::string> input_files;
-    std::vector<std::string> hidden_classes_regex;
-    // Diff mode: when two files are given (older.json newer.json) the first
-    // is the baseline and the second the new state; the diagram highlights
-    // what was added (green) and removed (red).
-    bool diff_mode;
-
-    TemplateRenderer renderer;
+    UmlModel model_;
 };
 
 }  // namespace uml
