@@ -104,6 +104,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             width: 268px;
         }
         #controls h3 { margin: 0 0 4px; font-size: 14px; }
+        .filterLabel { margin: 8px 0 0; font-size: 11px; color: var(--muted); }
         #controls input, #controls select {
             width: 100%;
             padding: 6px 8px;
@@ -258,11 +259,18 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             </div>
         </div>
         <h3>Filter classes</h3>
+        <div class="filterLabel">Name regex</div>
         <input type="text" id="filterInput" placeholder="regex, e.g. ^Parser|Generator$"
+               onkeydown="if (event.key === 'Enter') applyFilter()">
+        <div class="filterLabel">Namespace regex</div>
+        <input type="text" id="nsFilterInput" placeholder="regex on the namespace, e.g. ^core|util\."
                onkeydown="if (event.key === 'Enter') applyFilter()">
         <button onclick="applyFilter()">Apply Filter</button>
         <button class="secondary" onclick="resetFilter()">Reset</button>
         <button class="secondary" onclick="resetView()">Reset View</button>
+        <div class="filterLabel">Max classes drawn (nearest first)</div>
+        <input type="number" id="lodInput" min="10" step="50" value="500"
+               onchange="setLodLimit(this.value)">
         <div id="diffWrap" style="display:none">
             <h3>Diff view</h3>
             <select id="diffSelect">
@@ -299,7 +307,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             <option value="light">Light</option>
             <option value="blue">Vim darkblue</option>
         </select>
-        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class &middot; click a class name in the sidebar to focus &middot; keys: n / &rarr; next class &middot; p / &larr; previous class &middot; c center view</div>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class, or double-click an inheritance line to jump to its far end &middot; click a class name in the sidebar to focus &middot; keys: n / &rarr; next class &middot; p / &larr; previous class &middot; c center view &middot; w / a / s / d move the view</div>
         <div id="stats"></div>
         <div id="diffStats" style="display:none"></div>
         </div>
@@ -432,10 +440,11 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
 
         const classes = DIFF_MODE ? computeDiff(oldMerged, newMerged) : newMerged;
 
-        // --- Visibility state (diff filter + name filter, applied together) ---
+        // --- Visibility state (diff filter + name + namespace filters) ---
         // Default: in diff mode hide unchanged classes so only the changes show.
         let showOnlyChanges = DIFF_MODE;
-        let currentRegex = null;
+        let currentRegex = null;      // name regex filter
+        let currentNsRegex = null;    // namespace regex filter
         // name -> status (undefined in non-diff mode). Used to hide 'unchanged'
         // nodes when "Changes only" is active. (Name-keyed: same-named classes in
         // different namespaces are already merged into one node — pre-existing.)
@@ -443,8 +452,15 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         classes.forEach(c => { if (c.status) statusByName.set(c.name, c.status); });
         const diffVisible = status => !(DIFF_MODE && showOnlyChanges && status === 'unchanged');
         const regexVisible = name => !currentRegex || currentRegex.test(name);
+        // A class matches the namespace filter on its own namespace.
+        // (External stubs have none — they follow their children instead.)
+        const nsVisible = name => {
+            if (!currentNsRegex) return true;
+            const n = nodes.get(name);
+            return !!(n && n.cls) && currentNsRegex.test(n.cls.namespace || '');
+        };
         const classVisible = name =>
-            regexVisible(name) && diffVisible(statusByName.get(name));
+            regexVisible(name) && nsVisible(name) && diffVisible(statusByName.get(name));
 
         // --- UML notation helpers ---
         const VIS_GLYPH = { public: '+', private: '-', protected: '#' };
@@ -974,6 +990,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         for (const n of nodes.values()) diagram.add(n.mesh);
+        const nodeList = [...nodes.values()];   // stable list for picking / LOD
 
         // Faint floor grid as a depth cue (rebuilt when the layout or theme changes)
         let span = 100, gridY = 0;
@@ -1137,6 +1154,59 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
         const focus = { active: false, ...homeView() };
 
+        // --- Level of detail: only the nearest classes are drawn ---
+        // Drawing every box every frame is what makes a 10k-class diagram
+        // unresponsive. The filters decide which classes *exist*; LOD then draws
+        // only the lodLimit nearest of those (plus any pinned ones), re-picking
+        // whenever the camera moves. The sidebar keeps the full filtered list.
+        let lodLimit = 500;
+        const pinned = new Set();      // focused classes always stay drawn
+        let lodPool = [];             // nodes that pass the filters (set by applyVisibility)
+        let lastLodCam = null;        // camera position LOD was last computed from
+        const heldKeys = new Set();   // w / a / s / d currently held
+
+        function applyLod() {
+            const p = camera.position;
+            let drawn;
+            if (lodPool.length <= lodLimit) {
+                drawn = new Set(lodPool.map(n => n.name));
+            } else {
+                lodPool.sort((a, b) =>
+                    (a.x - p.x) ** 2 + (a.y - p.y) ** 2 + (a.z - p.z) ** 2
+                  - (b.x - p.x) ** 2 + (b.y - p.y) ** 2 + (b.z - p.z) ** 2);
+                drawn = new Set(lodPool.slice(0, lodLimit).map(n => n.name));
+            }
+            pinned.forEach(n => drawn.add(n.name));
+            for (const n of nodes.values()) n.mesh.visible = drawn.has(n.name);
+            edgeObjs.forEach(e => {
+                const a = nodes.get(e.from), b = nodes.get(e.to);
+                e.line.visible = a.mesh.visible && b.mesh.visible;
+            });
+            // A namespace frame stays while any class inside it is drawn
+            panels.forEach(pl => {
+                pl.mesh.visible = pl.names.some(name => {
+                    const n = nodes.get(name);
+                    return n && !n.external && n.mesh.visible;
+                });
+            });
+        }
+
+        // True when the camera moved since the last applyLod (or it never ran)
+        function lodMoved() {
+            const p = camera.position;
+            const moved = !lastLodCam ||
+                (p.x - lastLodCam.x) ** 2 + (p.y - lastLodCam.y) ** 2
+                + (p.z - lastLodCam.z) ** 2 > 1e-4;
+            lastLodCam = { x: p.x, y: p.y, z: p.z };
+            return moved;
+        }
+
+        function setLodLimit(value) {
+            const n = parseInt(value, 10);
+            if (!isNaN(n) && n >= 1) lodLimit = n;
+            applyLod();
+        }
+
         container.addEventListener('mousedown', e => {
             if (e.button !== 0) return;  // left button only (others may context-menu)
             autoRotate = false;
@@ -1178,7 +1248,8 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
 
         // Double-click a class to point the camera at it; a double-click on
         // a member row jumps to the class named by that member's type
-        // (e.g. a "Mutability" field flies to the Mutability class)
+        // (e.g. a "Mutability" field flies to the Mutability class); a
+        // double-click on an inheritance line jumps to its far end
         const ray = new THREE.Raycaster();
         const TYPE_JUNK = /^(void|bool|char|short|int|long|float|double|auto|unsigned|signed|const|static|virtual|mutable|string|size_t|wchar_t|std)$/;
         function classInType(t) {
@@ -1194,21 +1265,36 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 ((e.clientX - rect.left) / rect.width) * 2 - 1,
                 -((e.clientY - rect.top) / rect.height) * 2 + 1);
             ray.setFromCamera(mouse, camera);
-            const hits = ray.intersectObjects([...nodes.values()].map(n => n.mesh));
-            if (!hits.length) return;
-            const n = [...nodes.values()].find(nd => nd.mesh === hits[0].object);
-            const hit = hits[0];
-            if (hit.uv && n.rows && n.ch) {
-                const py = (1 - hit.uv.y) * n.ch;
-                const row = n.rows.find(r => py >= r.y0 && py < r.y1);
-                if (row) {
-                    for (const t of row.types) {
-                        const target = classInType(t);
-                        if (target) { focusOn(nodes.get(target)); return; }
+            // Only pick among drawn classes — LOD culls the rest
+            const hits = ray.intersectObjects(nodeList.filter(n => n.mesh.visible).map(n => n.mesh));
+            if (hits.length) {
+                const n = nodeList.find(nd => nd.mesh === hits[0].object);
+                const hit = hits[0];
+                if (hit.uv && n.rows && n.ch) {
+                    const py = (1 - hit.uv.y) * n.ch;
+                    const row = n.rows.find(r => py >= r.y0 && py < r.y1);
+                    if (row) {
+                        for (const t of row.types) {
+                            const target = classInType(t);
+                            if (target) { focusOn(nodes.get(target)); return; }
+                        }
                     }
                 }
+                focusOn(n);
+                return;
             }
-            focusOn(n);
+            // No class under the cursor: pick the inheritance line there and
+            // jump to the end farthest from the camera ("the other end")
+            ray.params.Line.threshold = 1.5;
+            const edgeHits = ray.intersectObjects(
+                edgeObjs.filter(x => x.line.visible).map(x => x.line));
+            if (!edgeHits.length) return;
+            const edge = edgeObjs.find(x => x.line === edgeHits[0].object);
+            const a = nodes.get(edge.from), b = nodes.get(edge.to);
+            const p = camera.position;
+            const da = (a.x - p.x) ** 2 + (a.y - p.y) ** 2 + (a.z - p.z) ** 2;
+            const db = (b.x - p.x) ** 2 + (b.y - p.y) ** 2 + (b.z - p.z) ** 2;
+            focusOn(da > db ? a : b);
         });
 
         // Bring yaw onto [-pi, pi] so the focus animation takes the short way
@@ -1219,6 +1305,10 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
 
         function focusOn(n) {
             autoRotate = false;
+            pinned.clear();
+            pinned.add(n);
+            // Keep its parent drawn too, so the inheritance arrow stays in view
+            if (n.parent) { const p = nodes.get(n.parent); if (p) pinned.add(p); }
             wrapYaw();
             // Head-on view: the class front faces the camera, centered
             focus.yaw = 0;
@@ -1229,9 +1319,26 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         function resetView() {
+            pinned.clear();
             wrapYaw();
             Object.assign(focus, homeView());
             focus.active = true;
+        }
+
+        // w / a / s / d: slide the look-at target along the camera's forward
+        // and right axes; the step scales with the zoom distance so the speed
+        // feels the same far and near
+        function moveView() {
+            const step = view.dist * 0.02;
+            const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+            const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw);
+            const fx = -cp * sy, fy = -sp, fz = -cp * cy;   // camera forward
+            const rx = cy,      ry = 0,    rz = -sy;        // camera right
+            const fwd = (heldKeys.has('w') ? 1 : 0) - (heldKeys.has('s') ? 1 : 0);
+            const side = (heldKeys.has('d') ? 1 : 0) - (heldKeys.has('a') ? 1 : 0);
+            view.target.x += (fx * fwd + rx * side) * step;
+            view.target.y += (fy * fwd + ry * side) * step;
+            view.target.z += (fz * fwd + rz * side) * step;
         }
 
         // --- Colour themes ---
@@ -1284,7 +1391,11 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
 
         (function animate() {
             requestAnimationFrame(animate);
-            if (autoRotate) view.yaw += 0.002;
+            if (heldKeys.size) {
+                autoRotate = false;
+                focus.active = false;
+                moveView();
+            } else if (autoRotate) view.yaw += 0.002;
             if (focus.active) {
                 const k = 0.08;
                 view.yaw += (focus.yaw - view.yaw) * k;
@@ -1303,6 +1414,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 }
             }
             updateCamera();
+            if (lodMoved()) applyLod();
             renderer.render(scene, camera);
         })();
 
@@ -1421,13 +1533,15 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 = shown + ' of ' + classes.length + ' classes shown';
         }
 
-        // --- Visibility: apply the diff filter and the name filter together
-        // --- (classes are hidden in both the 3D scene and the panel)
+        // --- Visibility: apply the diff, name and namespace filters together
+        // --- (classes are hidden in both the 3D scene and the panel), then
+        // --- narrow the drawn set to the nearest lodLimit via applyLod()
         function applyVisibility() {
             const realVisible = new Map();
             nodes.forEach(n => {
                 if (!n.external) realVisible.set(n.name, classVisible(n.name));
             });
+            lodPool = [];
             nodes.forEach(n => {
                 let visible;
                 if (!n.external) {
@@ -1436,24 +1550,11 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                     // Unresolved base: keep it while any of its children is shown
                     visible = edgeObjs.some(e => e.to === n.name && realVisible.get(e.from));
                 }
-                n.mesh.visible = visible;
+                if (visible) lodPool.push(n);
             });
-            edgeObjs.forEach(e => {
-                const a = nodes.get(e.from), b = nodes.get(e.to);
-                e.line.visible = a.mesh.visible && b.mesh.visible;
-            });
-            // A namespace frame stays while any class inside it is shown
-            panels.forEach(p => {
-                const show = p.names.some(name => {
-                    const n = nodes.get(name);
-                    return n && !n.external && n.mesh.visible;
-                });
-                p.mesh.visible = show;
-            });
+            applyLod();
             document.querySelectorAll('.classCard').forEach(card => {
-                const vis = regexVisible(card.dataset.name)
-                    && diffVisible(card.dataset.status);
-                card.style.display = vis ? '' : 'none';
+                card.style.display = classVisible(card.dataset.name) ? '' : 'none';
             });
             // Hide a namespace group whose classes are all hidden
             document.querySelectorAll('.nsGroup').forEach(g => {
@@ -1465,18 +1566,27 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         function applyFilter() {
-            const value = document.getElementById('filterInput').value.trim();
-            if (!value) { currentRegex = null; applyVisibility(); return; }
-            let re;
-            try { re = new RegExp(value); }
-            catch (err) { alert('Invalid regex: ' + err.message); return; }
-            currentRegex = re;
+            const nameVal = document.getElementById('filterInput').value.trim();
+            const nsVal = document.getElementById('nsFilterInput').value.trim();
+            let nameRe = null, nsRe = null;
+            if (nameVal) {
+                try { nameRe = new RegExp(nameVal); }
+                catch (err) { alert('Invalid name regex: ' + err.message); return; }
+            }
+            if (nsVal) {
+                try { nsRe = new RegExp(nsVal); }
+                catch (err) { alert('Invalid namespace regex: ' + err.message); return; }
+            }
+            currentRegex = nameRe;
+            currentNsRegex = nsRe;
             applyVisibility();
         }
 
         function resetFilter() {
             document.getElementById('filterInput').value = '';
+            document.getElementById('nsFilterInput').value = '';
             currentRegex = null;
+            currentNsRegex = null;
             applyVisibility();
         }
 
@@ -1486,8 +1596,8 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // n or → steps to the next class, p or ← to the previous one — both
         // wrap around the classes currently shown in the sidebar — and c (or
         // Home) returns to the home view, the same destination as the
-        // "Reset View" button. The current class stays highlighted until the
-        // camera moves on. Keys are ignored while typing in a field (e.g.
+        // "Reset View" button. w / a / s / d slide the view along the camera's
+        // forward / right axes. Keys are ignored while typing in a field (e.g.
         // the filter box) or while a modifier is held, so browser shortcuts
         // and normal typing keep working.
         let navIndex = -1;
@@ -1536,10 +1646,17 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             const tag = (e.target && e.target.tagName) || '';
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
             if (e.key === 'n' || e.key === 'N' || e.key === 'ArrowRight') { e.preventDefault(); navTo(1); }
             else if (e.key === 'p' || e.key === 'P' || e.key === 'ArrowLeft') { e.preventDefault(); navTo(-1); }
             else if (e.key === 'c' || e.key === 'C' || e.key === 'Home') { e.preventDefault(); navCenter(); }
+            else if (k === 'w' || k === 'a' || k === 's' || k === 'd') { e.preventDefault(); heldKeys.add(k); }
         });
+        window.addEventListener('keyup', e => {
+            const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+            heldKeys.delete(k);
+        });
+        window.addEventListener('blur', () => heldKeys.clear());
 
         // Restore the saved colour scheme (falling back to dark) and wire
         // up the selector
