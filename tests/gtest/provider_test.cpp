@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 #include "core/analyzer.h"
+#include "core/commit_provider.h"
 #include "core/compile_commands_provider.h"
 #include "core/directory_provider.h"
 #include "core/parser_registry.h"
 #include "core/provider_registry.h"
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -25,6 +28,56 @@ void write_file(const fs::path& path, const std::string& body) {
 std::set<std::string> names(const AnalysisResult& result) {
     std::set<std::string> out;
     for (const auto& c : result.classes) out.insert(c->name);
+    return out;
+}
+
+// --- git helpers for the commit-source tests ----------------------------
+
+const char* kGitId = "-c user.email=t@t -c user.name=t -c commit.gpgsign=false";
+
+bool git_run(const std::string& cmd) {
+    return std::system(cmd.c_str()) == 0;
+}
+
+std::string git_capture(const std::string& cmd) {
+    std::string out;
+    std::FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return out;
+    char buf[256];
+    std::size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, pipe)) > 0) out.append(buf, n);
+    pclose(pipe);
+    if (!out.empty() && out.back() == '\n') out.pop_back();
+    return out;
+}
+
+// A scratch superproject with one committed submodule:
+//   <base>/super/app.cpp                class AppMain
+//   <base>/super/libs/thing/src/sub.cpp class SubWidget (via gitlink)
+// <base>/sub_repo is the submodule's own repository.
+void build_superproject(const fs::path& base) {
+    fs::remove_all(base);
+    auto sub = base / "sub_repo";
+    fs::create_directories(sub);
+    write_file(sub / "src" / "sub.cpp", "class SubWidget { public: int s; };\n");
+    ASSERT_TRUE(git_run("cd '" + sub.string() + "' && git init -q && git add -A"
+        " && git " + kGitId + " commit -q -m sub"));
+
+    auto super = base / "super";
+    fs::create_directories(super);
+    write_file(super / "app.cpp", "class AppMain { public: int m; };\n");
+    ASSERT_TRUE(git_run("cd '" + super.string() + "' && git init -q && git add app.cpp"
+        " && git " + kGitId + " commit -q -m app"));
+    // modern git blocks the file transport for submodule clones by default
+    // (CVE-2022-39253); this is a local test fixture, so allow it here
+    ASSERT_TRUE(git_run("cd '" + super.string() + "' && git -c protocol.file.allow=always"
+        " submodule add -q '" + sub.string() + "' libs/thing"
+        " && git " + kGitId + " commit -q -m pin"));
+}
+
+std::set<std::string> basenames(const std::vector<std::string>& files) {
+    std::set<std::string> out;
+    for (const auto& f : files) out.insert(fs::path(f).filename().string());
     return out;
 }
 
@@ -107,18 +160,25 @@ TEST(CompileCommandsProviderTest, MalformedDatabaseDegradesGracefully) {
     EXPECT_TRUE(object.files().empty());
 }
 
-// The standard registry offers exactly the two built-in kinds, and an unknown
+// The standard registry offers exactly the built-in kinds, and an unknown
 // kind yields nullptr rather than a silently-wrong default provider.
-TEST(ProviderRegistryTest, StandardHasBothKinds) {
+TEST(ProviderRegistryTest, StandardHasAllKinds) {
     ProviderRegistry registry = ProviderRegistry::standard({".git", "build"});
 
     EXPECT_TRUE(registry.has_provider("directory"));
     EXPECT_TRUE(registry.has_provider("compile-commands"));
-    EXPECT_NE(registry.create("directory", "/some/root"), nullptr);
-    EXPECT_NE(registry.create("compile-commands", "/some/db.json"), nullptr);
+    EXPECT_TRUE(registry.has_provider("commit"));
+
+    ProviderOptions opts;
+    opts.path = "/some/root";
+    EXPECT_NE(registry.create("directory", opts), nullptr);
+    opts.path = "/some/db.json";
+    EXPECT_NE(registry.create("compile-commands", opts), nullptr);
+    opts = ProviderOptions{"/some/repo", "v1.0", ""};
+    EXPECT_NE(registry.create("commit", opts), nullptr);
 
     EXPECT_FALSE(registry.has_provider("vcpkg"));
-    EXPECT_EQ(registry.create("vcpkg", "/whatever"), nullptr);
+    EXPECT_EQ(registry.create("vcpkg", ProviderOptions{"", "", ""}), nullptr);
 }
 
 // skip_dirs registered on the registry flow through to the provider it builds.
@@ -129,7 +189,9 @@ TEST(ProviderRegistryTest, DirectoryProviderRespectsRegisteredSkipDirs) {
     write_file(root / "build" / "gen.cpp", "class Generated { public: int g; };\n");
 
     ProviderRegistry registry = ProviderRegistry::standard({"build"});
-    auto provider = registry.create("directory", root.string());
+    ProviderOptions opts;
+    opts.path = root.string();
+    auto provider = registry.create("directory", opts);
     ASSERT_NE(provider, nullptr);
     EXPECT_EQ(provider->files().size(), 1u);
 }
@@ -168,4 +230,138 @@ TEST(AnalyzerTest, CompileCommandsPathMatchesDirectoryPath) {
     EXPECT_EQ(via_directory.classes.size(), 3u);
     EXPECT_EQ(names(via_directory), names(via_database));
     EXPECT_EQ(names(via_database), (std::set<std::string>{"AppMain", "Widget", "Helper"}));
+}
+
+// The commit source reads the superproject's files AND the submodule's files
+// (the gitlink's path), with content taken from git objects at the pinned
+// SHA — staged under a single root mirroring the project tree.
+TEST(CommitProviderTest, ListsSuperprojectAndSubmoduleFiles) {
+    auto base = fs::temp_directory_path() / "commit_provider_test";
+    build_superproject(base);
+    const auto super = base / "super";
+
+    CommitFileProvider provider(super.string(), "HEAD");
+    auto files = provider.files();
+
+    std::string staged_app, staged_sub;
+    for (const auto& f : files) {
+        if (fs::path(f).filename() == "app.cpp") staged_app = f;
+        if (fs::path(f).filename() == "sub.cpp") staged_sub = f;
+    }
+    // .gitmodules is committed by `git submodule add`, so it is part of the
+    // tree too (the analyzer has no parser for it — it contributes no classes).
+    EXPECT_EQ(basenames(files),
+              (std::set<std::string>{".gitmodules", "app.cpp", "sub.cpp"}));
+    ASSERT_FALSE(staged_app.empty());
+    ASSERT_FALSE(staged_sub.empty());
+
+    // Everything stages under one root mirroring the tree: sub.cpp sits
+    // under its gitlink path relative to the same root as app.cpp.
+    const fs::path root = fs::path(staged_app).parent_path();
+    EXPECT_EQ(staged_sub.rfind(root.string(), 0), 0u);
+    // sub.cpp sits at <staging>/libs/thing/src/sub.cpp — the gitlink's path
+    // ("libs/thing") is preserved under the same root as app.cpp.
+    EXPECT_EQ(fs::path(staged_sub).parent_path().parent_path().filename().string(),
+              "thing");
+
+    // Content is the submodule's committed text — proof of the SHA-pinned
+    // git-show read, not whatever the working tree might hold.
+    std::ifstream in(staged_sub);
+    std::string body((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    EXPECT_EQ(body, "class SubWidget { public: int s; };\n");
+}
+
+// The ref may be any rev that resolves to a commit: a tag and the full SHA
+// both yield the same file set as HEAD.
+TEST(CommitProviderTest, RefByTagAndSha) {
+    auto base = fs::temp_directory_path() / "commit_provider_test";
+    build_superproject(base);
+    const auto super = base / "super";
+    ASSERT_TRUE(git_run("cd '" + super.string() + "' && git tag v1"));
+
+    const std::string sha =
+        git_capture("git -C '" + super.string() + "' rev-parse HEAD");
+    ASSERT_FALSE(sha.empty());
+
+    // includes .gitmodules (see ListsSuperprojectAndSubmoduleFiles)
+    const auto expected = (std::set<std::string>{".gitmodules", "app.cpp", "sub.cpp"});
+    CommitFileProvider by_ref(super.string(), "HEAD");
+    CommitFileProvider by_tag(super.string(), "v1");
+    CommitFileProvider by_sha(super.string(), sha);
+    EXPECT_EQ(basenames(by_ref.files()), expected);
+    EXPECT_EQ(basenames(by_tag.files()), expected);
+    EXPECT_EQ(basenames(by_sha.files()), expected);
+}
+
+// An unresolvable ref degrades to an empty list (and a stderr warning) —
+// the same behavior class as a missing compile database.
+TEST(CommitProviderTest, MissingRefDegradesGracefully) {
+    auto base = fs::temp_directory_path() / "commit_provider_test";
+    build_superproject(base);
+    const auto super = base / "super";
+
+    CommitFileProvider provider(super.string(), "no-such-ref-xyz");
+    EXPECT_TRUE(provider.files().empty());
+    EXPECT_EQ(provider.banner(), "Analyzing commit no-such-ref-xyz of " + super.string());
+}
+
+// The default staging dir is created while the provider is alive and removed
+// when it is destroyed (RAII); an explicit --staging dir is kept.
+TEST(CommitProviderTest, AutoStagingIsCleanedExplicitStagingKept) {
+    auto base = fs::temp_directory_path() / "commit_provider_test";
+    build_superproject(base);
+    const auto super = base / "super";
+
+    auto count_auto = []() {
+        std::size_t n = 0;
+        std::error_code ec;
+        for (auto it = fs::directory_iterator(fs::temp_directory_path(), ec);
+             !ec && it != fs::directory_iterator(); ++it) {
+            const auto name = it->path().filename().string();
+            if (it->is_directory() && name.rfind("code_analyzer_commit_", 0) == 0) ++n;
+        }
+        return n;
+    };
+
+    const std::size_t before = count_auto();
+    {
+        CommitFileProvider provider(super.string(), "HEAD");
+        auto files = provider.files();
+        ASSERT_FALSE(files.empty());
+        EXPECT_GT(count_auto(), before);          // created while alive
+        EXPECT_TRUE(fs::exists(files.front()));
+    }
+    EXPECT_EQ(count_auto(), before);              // gone after destruction
+
+    // An explicitly supplied staging directory is used and left in place.
+    auto keep = fs::temp_directory_path() / "commit_provider_keep";
+    fs::remove_all(keep);
+    {
+        CommitFileProvider provider(super.string(), "HEAD", keep.string());
+        auto files = provider.files();
+        ASSERT_FALSE(files.empty());
+        EXPECT_EQ(fs::path(files.front()).root_path(), fs::weakly_canonical(keep).root_path());
+    }
+    EXPECT_TRUE(fs::exists(keep / "app.cpp"));
+    fs::remove_all(keep);
+}
+
+// Parity: the commit source must find exactly the classes a directory walk
+// of the same tree finds — including the submodule's class.
+TEST(AnalyzerTest, CommitPathMatchesDirectoryPath) {
+    auto base = fs::temp_directory_path() / "commit_provider_parity";
+    build_superproject(base);
+    const auto super = base / "super";
+
+    Config config;
+    ParserRegistry parsers = ParserRegistry::standard();
+    Analyzer analyzer(config, parsers);
+
+    auto via_commit = analyzer.analyze_commit(super.string(), "HEAD");
+    auto via_directory = analyzer.analyze_project(super.string());
+
+    EXPECT_EQ(via_commit.classes.size(), 2u);
+    EXPECT_EQ(names(via_commit), names(via_directory));
+    EXPECT_EQ(names(via_commit), (std::set<std::string>{"AppMain", "SubWidget"}));
 }

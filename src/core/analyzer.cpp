@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <iostream>
 
+#include "core/commit_provider.h"
 #include "core/compile_commands_provider.h"
 #include "core/directory_provider.h"
 
@@ -60,6 +61,16 @@ AnalysisResult Analyzer::analyze_compile_commands(const std::string& compile_com
     // A compile database is just another file source: read the listed
     // translation units, then parse them through the standard pipeline.
     CompileCommandsFileProvider provider(compile_commands_path);
+    return analyze(provider);
+}
+
+AnalysisResult Analyzer::analyze_commit(const std::string& repo,
+                                        const std::string& ref,
+                                        const std::string& staging) {
+    // A commit-pinned source is just another file source: materialize the
+    // git-show content (submodules at their parent-pinned SHAs), then parse
+    // it through the standard pipeline.
+    CommitFileProvider provider(repo, ref, staging);
     return analyze(provider);
 }
 

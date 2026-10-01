@@ -27,6 +27,16 @@ void print_usage(const std::string& program_name) {
     std::cout << "                              compile_commands.json (the .cpp translation\n";
     std::cout << "                              units). Does NOT follow #include'd headers\n";
     std::cout << "                              or .tpp template files.\n";
+    std::cout << "  --commit <repo[@ref]>       Analyze the repository at <repo> as of\n";
+    std::cout << "                              <ref> (default HEAD) from git objects — no\n";
+    std::cout << "                              checkout needed. Superproject/submodule\n";
+    std::cout << "                              layouts are detected: each submodule's\n";
+    std::cout << "                              files are read at the commit SHA the\n";
+    std::cout << "                              parent repo records for it.\n";
+    std::cout << "  --staging <dir>             With --commit: materialize the commit's\n";
+    std::cout << "                              files into <dir> and keep it (by default\n";
+    std::cout << "                              a temp dir is used and removed after the\n";
+    std::cout << "                              run).\n";
     std::cout << "  --json <file>               Write analysis results to a JSON file\n";
     std::cout << "  --config <file>             Read options (source_extensions, skip_dirs)\n";
     std::cout << "                              from a JSON configuration file\n";
@@ -43,6 +53,8 @@ void print_usage(const std::string& program_name) {
     std::cout << "  " << program_name << " --directory /path/to/project\n";
     std::cout << "  " << program_name << " --json out.json /path/to/project\n";
     std::cout << "  " << program_name << " --compile-commands /path/to/compile_commands.json\n";
+    std::cout << "  " << program_name << " --commit /path/to/repo@v1.2.0\n";
+    std::cout << "  " << program_name << " --staging /tmp/keep --commit /path/to/repo@HEAD\n";
 }
 
 /**
@@ -60,6 +72,8 @@ int main(int argc, char* argv[]) {
 
     std::string input_path = argv[argc - 1];
     bool use_compile_commands = false;
+    bool use_commit = false;
+    std::string staging_dir;
     std::string json_output;
     std::string config_path;
 
@@ -72,9 +86,17 @@ int main(int argc, char* argv[]) {
         if (arg == "--compile-commands" && i + 1 < argc) {
             input_path = argv[++i];
             use_compile_commands = true;
+            use_commit = false;
         } else if (arg == "--directory" && i + 1 < argc) {
             input_path = argv[++i];
             use_compile_commands = false;
+            use_commit = false;
+        } else if (arg == "--commit" && i + 1 < argc) {
+            input_path = argv[++i];
+            use_commit = true;
+            use_compile_commands = false;
+        } else if (arg == "--staging" && i + 1 < argc) {
+            staging_dir = argv[++i];
         } else if (arg == "--json" && i + 1 < argc) {
             json_output = argv[++i];
         } else if (arg == "--config" && i + 1 < argc) {
@@ -109,8 +131,25 @@ int main(int argc, char* argv[]) {
 
         // The input mode selects the file provider; the analyzer itself is
         // agnostic about where the files come from.
-        const std::string kind = use_compile_commands ? "compile-commands" : "directory";
-        auto provider = providers.create(kind, input_path);
+        ProviderOptions opts;
+        std::string kind;
+        if (use_commit) {
+            // <repo[@ref]> splits on the LAST '@' (a path may legally contain
+            // one); with no '@' the ref defaults to HEAD inside the provider.
+            const auto at = input_path.rfind('@');
+            if (at > 0) {
+                opts.path = input_path.substr(0, at);
+                opts.secondary = input_path.substr(at + 1);
+            } else {
+                opts.path = input_path;
+            }
+            opts.staging = staging_dir;
+            kind = "commit";
+        } else {
+            opts.path = input_path;
+            kind = use_compile_commands ? "compile-commands" : "directory";
+        }
+        auto provider = providers.create(kind, opts);
         if (!provider) {
             std::cerr << "Error: unknown input mode \"" << kind << "\"\n";
             return 1;

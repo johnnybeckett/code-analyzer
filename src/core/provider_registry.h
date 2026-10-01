@@ -18,28 +18,41 @@
  * register_provider() call — neither main.cpp nor the Analyzer changes (OCP).
  * Callers work through the SourceFileProvider abstraction only (DIP).
  */
+/**
+ * @brief Everything a provider kind needs to know where its files come from.
+ *
+ * One struct instead of a growing string-argument list so each kind reads
+ * exactly the fields it cares about (ISP): "directory" and "compile-commands"
+ * use `path` only; "commit" adds `secondary` (the ref) and `staging` (where
+ * the materialized files go; empty = auto temp dir).
+ */
+struct ProviderOptions {
+    std::string path;       // primary input: root dir, DB, or repo
+    std::string secondary;  // kind-specific (commit ref); empty for other kinds
+    std::string staging;    // commit source only; empty = auto temp dir
+};
+
 class ProviderRegistry {
 public:
     /**
-     * @brief Builds a fresh provider for a given input path.
-     *
-     * Carries the path (unlike ParserFactory) because a provider's file set is
-     * defined by where it looks: a root directory, a compile database, ...
+     * @brief Builds a fresh provider from the inputs that define its file set:
+     *        a root directory, a compile database, a repo at a commit, ...
      */
     using ProviderFactory =
-        std::function<std::unique_ptr<SourceFileProvider>(const std::string&)>;
+        std::function<std::unique_ptr<SourceFileProvider>(const ProviderOptions&)>;
 
     void register_provider(const std::string& kind, ProviderFactory factory);
 
     std::unique_ptr<SourceFileProvider> create(const std::string& kind,
-                                               const std::string& path) const;
+                                               const ProviderOptions& opts) const;
 
     bool has_provider(const std::string& kind) const;
 
     /**
      * @brief A registry pre-loaded with the standard providers:
-     *        "directory" (recursive walk, pruning the given skip directories)
-     *        and "compile-commands" (a compile_commands.json file list).
+     *        "directory" (recursive walk, pruning the given skip directories),
+     *        "compile-commands" (a compile_commands.json file list), and
+     *        "commit" (a repo at a commit, read via `git show`).
      *
      * Kept in one auditable place so the composition root (main) and the tests
      * register the identical set.

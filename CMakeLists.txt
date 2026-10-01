@@ -22,6 +22,7 @@ add_library(code_analyzer_core STATIC
     src/core/analyzer.cpp
     src/core/directory_provider.cpp
     src/core/compile_commands_provider.cpp
+    src/core/commit_provider.cpp
     src/core/provider_registry.cpp
     src/core/parser_registry.cpp
     src/core/config.cpp

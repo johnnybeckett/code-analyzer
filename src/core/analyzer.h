@@ -42,6 +42,18 @@ public:
      */
     AnalysisResult analyze_compile_commands(const std::string& compile_commands_path);
 
+    /**
+     * @brief Analyze a repository's sources at a commit, read via `git show`.
+     *
+     * Convenience wrapper over analyze(): builds a CommitFileProvider (no
+     * checkout required; superproject/submodule layouts are detected and each
+     * submodule is read at the SHA the parent repo records) and runs it, so
+     * commit-pinned sources flow through the same parser pipeline.
+     */
+    AnalysisResult analyze_commit(const std::string& repo,
+                                  const std::string& ref = "HEAD",
+                                  const std::string& staging = "");
+
 private:
     void emit(const AnalysisEvent& event) const;
 
