@@ -315,6 +315,13 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             cursor: pointer;
         }
         .pane-var a:hover { color: var(--syn-keyword); }
+        /* Known type names in the source pane read as links (focus that class). */
+        #pane-code a.syn-link {
+            color: var(--syn-type);
+            text-decoration: underline dotted;
+            cursor: pointer;
+        }
+        #pane-code a.syn-link:hover { color: var(--syn-keyword); }
         #pane-tabs {
             flex: 0 0 auto;
             display: flex;
@@ -362,6 +369,38 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         #pane-code .syn-comment { color: var(--syn-comment); font-style: italic; }
         #pane-code .syn-number { color: var(--syn-number); }
         #pane-code .syn-placeholder { color: var(--muted); font-style: italic; }
+        /* Diff mode: OLD | NEW columns of aligned line rows. Rows keep the
+           pane's monospace/pre formatting; long lines widen the row and the
+           pane scrolls, like the single-file view. */
+        #pane-code .diff-split { display: flex; align-items: stretch; }
+        #pane-code .diff-col { flex: 1 1 0; min-width: 0; }
+        #pane-code .diff-col + .diff-col { border-left: 1px solid var(--border); }
+        #pane-code .diff-col-head {
+            padding: 4px 8px;
+            margin: 0 0 6px;
+            font-size: 11px;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #pane-code .diff-col-none { font-style: italic; }
+        #pane-code .dl { display: flex; min-height: 1.55em; }
+        #pane-code .dl-ln {
+            flex: 0 0 auto;
+            min-width: 3.5ch;
+            padding-right: 8px;
+            margin-right: 6px;
+            text-align: right;
+            color: var(--muted);
+            border-right: 1px solid var(--border);
+            user-select: none;
+        }
+        #pane-code .dl-src { flex: 1 1 auto; }
+        #pane-code .dl-del { background: rgba(197, 34, 31, 0.18); }
+        #pane-code .dl-add { background: rgba(24, 128, 56, 0.18); }
+        #pane-code .dl-gap { height: 1.55em; }
     </style>
 </head>
 <body>
@@ -403,6 +442,9 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 <option value="changes" selected>Changes only</option>
                 <option value="everything">Show everything</option>
             </select>
+            <label style="display:block;margin-top:6px;cursor:pointer">
+                <input type="checkbox" id="ignoreWs"> Ignore whitespace
+            </label>
         </div>
         <h3>Layout</h3>
         <select id="layoutSelect">
@@ -433,7 +475,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             <option value="light">Light</option>
             <option value="blue">Vim darkblue</option>
         </select>
-        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class, or double-click an inheritance line to jump to its far end &middot; click a class name in the sidebar to focus &middot; keys: n / &rarr; next class &middot; p / &larr; previous class &middot; c center view &middot; w / a / s / d move the view</div>
+        <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class, or double-click an inheritance line to jump to its far end &middot; click a class name in the sidebar to focus &middot; click a type in the source pane to jump to it &middot; keys: n / &rarr; next class &middot; p / &larr; previous class &middot; c center view &middot; w / a / s / d move the view</div>
         <div id="stats"></div>
         <div id="diffStats" style="display:none"></div>
         </div>
@@ -1870,6 +1912,8 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         };
         let activePath = null;   // the tab whose fetch is in flight / shown
         let curFiles = [];       // tab order for the focused class
+        let lastFocus = null;    // last class showDiff rendered (diff mode)
+        let ignoreWhitespace = false;  // diff lines compared modulo whitespace
 
         // --- Focus history: newest last, capped at 30; Ctrl-Z steps back ---
         const hist = [];
@@ -1964,8 +2008,19 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 else if (m[2] !== undefined) out += '<span class="syn-string">' + esc(m[2]) + '</span>';
                 else if (m[3] !== undefined) {
                     if (SYN_KEYWORDS.has(m[3])) out += '<span class="syn-keyword">' + esc(m[3]) + '</span>';
-                    else if (/^[A-Z]/.test(m[3])) out += '<span class="syn-type">' + esc(m[3]) + '</span>';
-                    else out += esc(m[3]);
+                    else {
+                        // A name known to the model: a clickable link that
+                        // focuses that class (delegated handler on #pane-code).
+                        const target = classInType(m[3]);
+                        if (target) {
+                            const tn = nodes.get(target);
+                            out += '<a class="syn-type syn-link" data-target="' + esc(target) +
+                                   '" title="Focus ' + esc(tn.cls ? displayName(tn.cls) : target) + '">'
+                                   + esc(m[3]) + '</a>';
+                        }
+                        else if (/^[A-Z]/.test(m[3])) out += '<span class="syn-type">' + esc(m[3]) + '</span>';
+                        else out += esc(m[3]);
+                    }
                 } else if (m[4] !== undefined) out += '<span class="syn-number">' + esc(m[4]) + '</span>';
             }
             out += esc(code.slice(last));
@@ -1992,6 +2047,127 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                     setPlaceholder('source not available for ' + path);
                 });
         }
+
+        // --- Diff-mode source: OLD | NEW side by side, changes highlighted --
+        // lineDiff: LCS alignment of two line arrays -> ops list. Each op is
+        // [oldIdx|null, newIdx|null]: same = [i,j], removed = [i,null],
+        // added = [null,j]. With ignoreWs on, lines are compared with all
+        // whitespace stripped (like `git diff -w`) — `a = 1` and `a=1` are
+        // the same line — while the original text is still rendered.
+        const LINE_DIFF_CELLS = 4000000;  // budget for the O(n·m) LCS table
+        function lineDiff(oldLines, newLines, ignoreWs) {
+            const norm = s => ignoreWs ? s.replace(/\s/g, '') : s;
+            const a = oldLines.map(norm), b = newLines.map(norm);
+            const n = a.length, m = b.length;
+            const ops = [];
+            if (n * m <= LINE_DIFF_CELLS) {
+                // LCS, bottom-up; Uint32 keeps the table small
+                const W = m + 1;
+                const dp = new Uint32Array((n + 1) * W);
+                for (let i = n - 1; i >= 0; i--)
+                    for (let j = m - 1; j >= 0; j--)
+                        dp[i * W + j] = a[i] === b[j]
+                            ? dp[(i + 1) * W + j + 1] + 1
+                            : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
+                let i = 0, j = 0;
+                while (i < n && j < m) {
+                    if (a[i] === b[j]) { ops.push([i, j]); i++; j++; }
+                    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) { ops.push([i, null]); i++; }
+                    else { ops.push([null, j]); j++; }
+                }
+                while (i < n) { ops.push([i, null]); i++; }
+                while (j < m) { ops.push([null, j]); j++; }
+            } else {
+                // Too big for the table: trim the common prefix/suffix and
+                // mark the whole middle as changed (coarse, but safe)
+                let pre = 0;
+                while (pre < n && pre < m && a[pre] === b[pre]) pre++;
+                let suf = 0;
+                while (suf < n - pre && suf < m - pre &&
+                       a[n - 1 - suf] === b[m - 1 - suf]) suf++;
+                for (let k = 0; k < pre; k++) ops.push([k, k]);
+                for (let k = pre; k < n - suf; k++) ops.push([k, null]);
+                for (let k = pre; k < m - suf; k++) ops.push([null, k]);
+                for (let k = 0; k < suf; k++) ops.push([n - 1 - k, m - 1 - k]);
+            }
+            return ops;
+        }
+
+        // One aligned row: line number + highlighted source, so keywords and
+        // types keep their colors and known type names stay clickable (the
+        // delegated #pane-code handler covers these rows too).
+        function renderLine(line, status, ln) {
+            return '<div class="dl ' + status + '"><span class="dl-ln">' + ln +
+                '</span><span class="dl-src">' + highlight(line) + '</span></div>';
+        }
+
+        // Build the two-column view from the alignment ops. `lines` may be
+        // null for a class absent from that revision (added / removed).
+        function diffColumns(oldLines, newLines, oldPath, newPath) {
+            const ops = lineDiff(oldLines || [], newLines || [], ignoreWhitespace);
+            const col = (lines, path, side) => {
+                const head = path ? esc(path)
+                    : '<span class="diff-col-none">' + esc(side === 'old'
+                        ? 'added — no file in old revision'
+                        : 'removed — no file in new revision') + '</span>';
+                let body = '';
+                for (const [oi, ni] of ops) {
+                    if (side === 'old') {
+                        if (oi === null) body += '<div class="dl dl-gap"></div>';
+                        else body += renderLine(lines[oi],
+                            ni === null ? 'dl-del' : 'dl-same', oi + 1);
+                    } else {
+                        if (ni === null) body += '<div class="dl dl-gap"></div>';
+                        else body += renderLine(lines[ni],
+                            oi === null ? 'dl-add' : 'dl-same', ni + 1);
+                    }
+                }
+                return '<div class="diff-col"><div class="diff-col-head">' + head + '</div>'
+                    + body + '</div>';
+            };
+            return '<div class="diff-split">'
+                + col(oldLines, oldPath, 'old')
+                + col(newLines, newPath, 'new') + '</div>';
+        }
+
+        // Fetch both revisions of the focused class (where they exist) and
+        // render the side-by-side diff. lastFocus guards against a slow fetch
+        // resolving after the user has focused something else.
+        function showDiff(n) {
+            lastFocus = n;
+            paneEl.tabs.style.display = 'none';
+            const c = n.cls;
+            if (!c) { setPlaceholder('external class — no source file in this model'); return; }
+            const key = (c.namespace || '') + '::' + c.name;
+            const fileOf = list => {
+                const r = list.find(o => (o.namespace || '') + '::' + o.name === key);
+                return (r && r.file) ? r.file : null;
+            };
+            const oldPath = fileOf(oldMerged);
+            const newPath = fileOf(newMerged);
+            if (!oldPath && !newPath) { setPlaceholder('no source file recorded for this class'); return; }
+            paneEl.code.innerHTML = '<span class="syn-placeholder">loading old and new source…</span>';
+            const load = p => p
+                ? fetch('/source?path=' + encodeURIComponent(p))
+                      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                : Promise.resolve(null);
+            Promise.all([load(oldPath), load(newPath)]).then(([oldText, newText]) => {
+                if (lastFocus !== n) return;   // superseded by a newer focus
+                paneEl.code.innerHTML = diffColumns(
+                    oldText === null ? null : oldText.split(/\r?\n/),
+                    newText === null ? null : newText.split(/\r?\n/),
+                    oldPath, newPath);
+            }).catch(() => {
+                if (lastFocus !== n) return;
+                setPlaceholder('source not available for this class');
+            });
+        }
+
+        // Re-diff the current focus when the ignore-whitespace toggle flips
+        document.getElementById('ignoreWs').addEventListener('change', e => {
+            ignoreWhitespace = e.target.checked;
+            if (DIFF_MODE && lastFocus) showDiff(lastFocus);
+        });
 
         // --- Focused class: title, clickable member types, tabs ------------
         function updatePane(n) {
@@ -2033,6 +2209,10 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 paneEl.vars.textContent = '';
             }
 
+            // Diff mode: OLD | NEW side-by-side source instead of the tabbed
+            // single-file view (showDiff hides the tabs and fetches both).
+            if (DIFF_MODE) { showDiff(n); return; }
+
             // Tabs for this class's source files, own file first; open it.
             curFiles = relatedFiles(n);
             activePath = null;
@@ -2049,6 +2229,18 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             if (curFiles.length) openTab(curFiles[0]);
             else setPlaceholder('no source file recorded for this class');
         }
+
+        // One delegated click handler on the stable #pane-code element: any
+        // known type name rendered by highlight() (tabbed view or diff split)
+        // focuses that class and records it in the history. Delegation on the
+        // container survives the innerHTML replacement on every re-render.
+        paneEl.code.addEventListener('click', e => {
+            const a = (e.target && e.target.closest)
+                ? e.target.closest('a[data-target]') : null;
+            if (!a) return;
+            const t = a.getAttribute('data-target');
+            if (t && nodes.has(t)) focusOn(nodes.get(t));
+        });
 
         // --- Drag the top handle to resize the pane (clamped 15%–80%) ------
         let paneDragging = false;

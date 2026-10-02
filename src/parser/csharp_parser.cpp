@@ -4,6 +4,7 @@
 #include <fstream>
 #include <regex>
 #include <sstream>
+#include <vector>
 #include <filesystem>
 
 namespace {
@@ -63,6 +64,42 @@ std::string namespace_at(const std::string& content, size_t pos) {
     return path;
 }
 
+/**
+ * @brief Split a C# base list into individual base types.
+ *
+ * Splits on top-level commas only, so commas inside a generic argument list
+ * (e.g. `Base<A, B>`) do not split. Each piece is trimmed of surrounding
+ * whitespace; empty pieces are dropped. Thus `Base<int>` and `MyNs.MyBase`
+ * each remain a single base, while `A, B<C, D>` yields `A` and `B<C, D>`.
+ * @param list The text after the `:`, up to the opening brace
+ * @return The base types, in order, with no spurious fragments
+ */
+std::vector<std::string> split_bases(const std::string& list) {
+    std::vector<std::string> out;
+    std::string cur;
+    int depth = 0;  // nesting inside generic `<...>` argument lists
+    for (char c : list) {
+        if (c == '<') ++depth;
+        else if (c == '>') { if (depth > 0) --depth; }
+        else if (c == ',' && depth == 0) {
+            const size_t b = cur.find_first_not_of(" \t\r\n");
+            if (b != std::string::npos) {
+                const size_t e = cur.find_last_not_of(" \t\r\n");
+                out.push_back(cur.substr(b, e - b + 1));
+            }
+            cur.clear();
+            continue;
+        }
+        cur.push_back(c);
+    }
+    const size_t b = cur.find_first_not_of(" \t\r\n");
+    if (b != std::string::npos) {
+        const size_t e = cur.find_last_not_of(" \t\r\n");
+        out.push_back(cur.substr(b, e - b + 1));
+    }
+    return out;
+}
+
 } // namespace
 
 /**
@@ -91,9 +128,13 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
 
     // Find type declarations: `class`, `struct`, and `record` (including
     // `record struct`). Group 1 is the declaration kind, the optional group
-    // 2 covers the `struct` keyword of a `record struct` pair, and group 3
-    // is the type name.
-    std::regex class_regex(R"(\b(class|struct|record)\s+(struct\s+)?(\w+)(?:\s*:\s*(.+?))?\s*\{)");
+    // 2 covers the `struct` keyword of a `record struct` pair, group 3 is the
+    // type name, the optional group 4 is a generic argument list (`Foo<T>`),
+    // and the optional group 5 is the base list after `:`. The base list is
+    // matched with `[^{]*?` (any character but `{`, lazy) so it may span
+    // multiple lines, and it stops before the opening brace of the body.
+    std::regex class_regex(
+        R"(\b(class|struct|record)\s+(struct\s+)?(\w+)(\s*<[^{};:]*>)?(?:\s*:\s*([^{]*?))?\s*\{)");
     std::smatch matches;
     std::string::const_iterator search_start(content.cbegin());
 
@@ -102,7 +143,7 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
     while (std::regex_search(search_start, content.cend(), matches, class_regex)) {
         std::string kind = matches[1];
         std::string class_name = matches[3];
-        std::string base_classes = matches[4];
+        std::string base_classes = matches[5];
 
         // Attribute the type to the innermost `namespace X.Y` enclosing it
         std::string namespace_path = namespace_at(content, matches.position(0));
@@ -112,16 +153,22 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
         type->kind = kind;
         type->file = file_path;
 
-        // Parse inheritance if exists
+        // Parse inheritance if exists. Split on top-level commas so a generic
+        // base (`Base<A, B>`) and a dotted name (`MyNs.MyBase`) each stay a
+        // single base, then convert dotted names to the model's `::` form so
+        // the viewer can link the real base class.
         if (!base_classes.empty()) {
-            // Split by comma for multiple inheritance
-            std::regex base_regex(R"(\s*(\w+)\s*)");
-            std::smatch base_matches;
-            std::string::const_iterator base_start(base_classes.cbegin());
-
-            while (std::regex_search(base_start, base_classes.cend(), base_matches, base_regex)) {
-                type->add_inheritance(base_matches[1]);
-                base_start = base_matches.suffix().first;
+            for (const std::string& raw : split_bases(base_classes)) {
+                std::string base = raw;
+                for (char& c : base) {
+                    if (c == '.') c = ':';
+                }
+                std::string converted;
+                for (size_t i = 0; i < base.size(); ++i) {
+                    converted += base[i];
+                    if (base[i] == ':') converted += ':';
+                }
+                type->add_inheritance(converted);
             }
         }
 

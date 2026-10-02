@@ -59,3 +59,68 @@ TEST(CSharpParserTest, ParseNonExistentFile) {
     // Should return nullptr for non-existent file
     EXPECT_EQ(parsed_class, nullptr);
 }
+
+// Regression: a generic base (`Base<int>`) is one base, not `Base` + `int`.
+TEST(CSharpParserTest, ParseGenericBase) {
+    std::string test_file = "/home/claude/code-analyzer/test_files/GenericBase.cs";
+
+    auto parsed_class = CSharpParser::parse_file(test_file);
+
+    ASSERT_NE(parsed_class, nullptr);
+    EXPECT_EQ(parsed_class->name, "Foo");
+    ASSERT_EQ(parsed_class->inheritance_list.size(), 1u);
+    EXPECT_EQ(parsed_class->inheritance_list[0], "Base<int>");
+}
+
+// Regression: a dotted base (`MyNs.MyBase`) is one base, stored in the model's
+// `::` form, not torn into `MyNs` and `MyBase`.
+TEST(CSharpParserTest, ParseQualifiedBase) {
+    std::string test_file = "/home/claude/code-analyzer/test_files/QualifiedBase.cs";
+
+    auto parsed_class = CSharpParser::parse_file(test_file);
+
+    ASSERT_NE(parsed_class, nullptr);
+    EXPECT_EQ(parsed_class->name, "Foo");
+    ASSERT_EQ(parsed_class->inheritance_list.size(), 1u);
+    EXPECT_EQ(parsed_class->inheritance_list[0], "MyNs::MyBase");
+}
+
+// Regression: a base list spanning multiple lines is captured fully (class
+// parses and both bases are present).
+TEST(CSharpParserTest, ParseMultiLineBase) {
+    std::string test_file = "/home/claude/code-analyzer/test_files/MultiLineBase.cs";
+
+    auto parsed_class = CSharpParser::parse_file(test_file);
+
+    ASSERT_NE(parsed_class, nullptr);
+    EXPECT_EQ(parsed_class->name, "Foo");
+    ASSERT_EQ(parsed_class->inheritance_list.size(), 2u);
+    EXPECT_EQ(parsed_class->inheritance_list[0], "BaseOne");
+    EXPECT_EQ(parsed_class->inheritance_list[1], "BaseTwo");
+}
+
+// Regression: a generic class (`Foo<T>`) parses, keeping its name and base.
+TEST(CSharpParserTest, ParseGenericClass) {
+    std::string test_file = "/home/claude/code-analyzer/test_files/GenericClass.cs";
+
+    auto parsed_class = CSharpParser::parse_file(test_file);
+
+    ASSERT_NE(parsed_class, nullptr);
+    EXPECT_EQ(parsed_class->name, "Foo");
+    ASSERT_EQ(parsed_class->inheritance_list.size(), 1u);
+    EXPECT_EQ(parsed_class->inheritance_list[0], "Base");
+}
+
+// Regression: multiple comma-separated bases stay distinct, and a generic base
+// with several type arguments is not split on its inner comma.
+TEST(CSharpParserTest, ParseMultipleBases) {
+    std::string test_file = "/home/claude/code-analyzer/test_files/MultiBase.cs";
+
+    auto parsed_class = CSharpParser::parse_file(test_file);
+
+    ASSERT_NE(parsed_class, nullptr);
+    EXPECT_EQ(parsed_class->name, "Foo");
+    ASSERT_EQ(parsed_class->inheritance_list.size(), 2u);
+    EXPECT_EQ(parsed_class->inheritance_list[0], "A");
+    EXPECT_EQ(parsed_class->inheritance_list[1], "B<C, D>");
+}
