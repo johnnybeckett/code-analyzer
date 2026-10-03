@@ -62,6 +62,7 @@ add_executable(UMLGenerator
 add_executable(UmlServer
     src/server/main.cpp
     src/server/uml_server.cpp
+    src/server/review_store.cpp
 )
 
 # Add documentation generator executable

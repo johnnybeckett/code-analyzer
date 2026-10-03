@@ -1,4 +1,5 @@
 #include "server/uml_server.h"
+#include "server/review_store.h"
 #include "uml/uml_model.h"
 
 #include <arpa/inet.h>
@@ -6,6 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <ifaddrs.h>
+#include <memory>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <iostream>
@@ -139,8 +141,28 @@ int main(int argc, char* argv[]) {
         sources.emplace(path, data.str());
     }
 
+    // In diff mode, review comments are enabled: they persist to a JSON file
+    // next to the baseline input, and the Markdown export is titled after the
+    // two inputs. In single-input mode the endpoints stay present but inert
+    // (review == nullptr), so the page's diff-mode UI is the only consumer.
+    const auto base = [](const std::string& p) {
+        const std::size_t i = p.find_last_of('/');
+        return (i == std::string::npos) ? p : p.substr(i + 1);
+    };
+    std::shared_ptr<server::ReviewStore> review;
+    std::string title;
+    if (model.is_diff()) {
+        const std::string rpath = input_files[0] + ".review.json";
+        review = std::make_shared<server::ReviewStore>(rpath);  // loads if present
+        title = base(input_files[0]) + " -> " + base(input_files[1]);
+        std::cout << "Review comments: " << rpath << "\n";
+    } else {
+        title = base(input_files[0]);
+    }
+
     server::UmlServer srv(std::move(body), std::move(sources),
-                          static_cast<std::uint16_t>(port));
+                          static_cast<std::uint16_t>(port),
+                          std::move(review), std::move(title));
     const unsigned int bound_port = srv.local_port();
 
     // Clean shutdown on Ctrl-C / SIGTERM.

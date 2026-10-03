@@ -401,6 +401,167 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         #pane-code .dl-del { background: rgba(197, 34, 31, 0.18); }
         #pane-code .dl-add { background: rgba(24, 128, 56, 0.18); }
         #pane-code .dl-gap { height: 1.55em; }
+
+        /* --- Diff mode: left file list, context menu, review comments ------ */
+        #file-list {
+            position: absolute;
+            top: 0; left: 0; bottom: var(--pane-h);
+            width: 210px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            z-index: 5;
+        }
+        #file-list-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        #file-list-head a {
+            font-size: 0.7rem;
+            font-weight: 500;
+            padding: 3px 9px;
+            background: var(--btn2);
+            color: var(--text);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            text-decoration: none;
+        }
+        #file-list-head a:hover { background: var(--accent); }
+        #file-list-body { flex: 1 1 auto; overflow-y: auto; padding: 4px 0; }
+        .fileEntry {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            font-size: 0.8rem;
+            color: var(--muted);
+            cursor: pointer;
+        }
+        .fileEntry:hover { background: rgba(66, 133, 244, 0.12); color: var(--text); }
+        .fileEntry.active { background: rgba(66, 133, 244, 0.24); color: var(--text); }
+        .fileEntry-name {
+            flex: 1 1 auto;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .fileEntry-badge {
+            flex: none;
+            font-size: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            padding: 1px 5px;
+            border-radius: 3px;
+            color: #fff;
+        }
+        .st-added { background: rgba(24, 128, 56, 0.92); }
+        .st-removed { background: rgba(197, 34, 31, 0.92); }
+        .st-modified { background: rgba(224, 140, 0, 0.9); }
+        .st-unchanged { background: rgba(100, 116, 139, 0.75); }
+        /* The left list takes 210px; slide the scene and controls clear of it. */
+        body.diffActive #scene { left: 214px; }
+        body.diffActive #controls { left: 226px; }
+
+        #ctxMenu {
+            position: fixed;
+            z-index: 60;
+            min-width: 190px;
+            background: var(--panel);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+            padding: 4px 0;
+        }
+        .ctxItem {
+            padding: 6px 14px;
+            font-size: 0.82rem;
+            color: var(--text);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .ctxItem:hover { background: rgba(66, 133, 244, 0.22); }
+        .ctxItem.disabled { color: var(--faint); cursor: default; }
+        .ctxItem.disabled:hover { background: none; }
+        .ctxItem a { color: var(--text); text-decoration: none; }
+        .ctxSep { height: 1px; background: var(--border); margin: 4px 0; }
+
+        /* Inline review-comment badge, appended to a diff row. */
+        .cm-badge {
+            flex: none;
+            min-width: 16px;
+            height: 16px;
+            line-height: 16px;
+            text-align: center;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.62rem;
+            cursor: help;
+        }
+
+        /* Floating comment-composition panel (kept out of the two-column diff
+           so it never shifts the row alignment). */
+        #commentForm {
+            position: fixed;
+            z-index: 60;
+            width: 340px;
+            box-sizing: border-box;
+            background: var(--panel);
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+            padding: 10px;
+        }
+        #commentForm .cf-head {
+            font-size: 0.82rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        #commentForm .cf-meta {
+            font-size: 0.72rem;
+            color: var(--muted);
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        #commentForm textarea {
+            width: 100%;
+            min-height: 58px;
+            box-sizing: border-box;
+            resize: vertical;
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border-strong);
+            border-radius: 4px;
+            padding: 5px 7px;
+            font-family: inherit;
+            font-size: 0.8rem;
+        }
+        #commentForm .cf-btns { display: flex; gap: 6px; margin-top: 8px; }
+        #commentForm button {
+            font-size: 0.76rem;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid var(--border-strong);
+        }
+        #commentForm .cf-submit { background: var(--accent); color: #fff; border-color: transparent; }
+        #commentForm .cf-cancel { background: var(--btn2); color: var(--text); }
+        #commentForm .cf-err { margin-top: 7px; font-size: 0.72rem; color: #f87171; }
+
+        /* Anchor flash after a resync. box-shadow (not background) so it layers
+           over the .dl-del / .dl-add tints instead of replacing them. */
+        .anchor-flash { animation: anchorFlash 1.2s ease-out; }
+        @keyframes anchorFlash {
+            0% { box-shadow: inset 0 0 0 3px var(--accent); }
+            100% { box-shadow: inset 0 0 0 0 rgba(66, 133, 244, 0); }
+        }
     </style>
 </head>
 <body>
@@ -481,6 +642,15 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         </div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
+
+    <div id="file-list" style="display:none">
+        <div id="file-list-head">
+            <span>Files</span>
+            <a id="exportBtn" href="/export/review" download="review.md"
+               title="Export review comments as a Markdown file">Export</a>
+        </div>
+        <div id="file-list-body"></div>
+    </div>
 
     <div id="source-pane">
         <div id="pane-handle" title="Drag to resize the source pane"></div>
@@ -617,6 +787,41 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         const classes = DIFF_MODE ? computeDiff(oldMerged, newMerged) : newMerged;
+
+        // --- Diff file list (left panel) ---
+        // Group the diffed classes by the (oldPath, newPath) pair — the thing a
+        // file diff is keyed on. NOT c.file: that is the NEW path for added/
+        // modified/unchanged classes but the OLD path for removed ones, so the
+        // pair has to be resolved from oldMerged/newMerged by the same
+        // namespace::name key computeDiff uses. A file's status is the worst of
+        // its classes (added/removed beats modified beats unchanged).
+        const FILE_RANK = { unchanged: 0, modified: 1, added: 2, removed: 2 };
+        const fileKeyOf = (o, n) => (o || '') + '||' + (n || '');
+        let fileEntries = [];    // [{oldPath, newPath, status, names:[...]}]
+        let fileIndex = new Map(); // fileKey -> index into fileEntries
+        if (DIFF_MODE) {
+            const fileOf = list => {
+                const m = new Map(list.map(c => [(c.namespace || '') + '::' + c.name, c]));
+                return key => { const r = m.get(key); return (r && r.file) ? r.file : null; };
+            };
+            const oldFileOf = fileOf(oldMerged);
+            const newFileOf = fileOf(newMerged);
+            const groups = new Map();
+            for (const c of classes) {
+                const key = (c.namespace || '') + '::' + c.name;
+                const oldPath = oldFileOf(key);
+                const newPath = newFileOf(key);
+                const fkey = fileKeyOf(oldPath, newPath);
+                if (!groups.has(fkey)) {
+                    groups.set(fkey, { oldPath, newPath, status: 'unchanged', names: [] });
+                }
+                const g = groups.get(fkey);
+                if ((FILE_RANK[c.status] || 0) > (FILE_RANK[g.status] || 0)) g.status = c.status;
+                g.names.push(c.name);
+            }
+            fileEntries = [...groups.values()];
+            fileIndex = new Map(fileEntries.map((e, i) => [fileKeyOf(e.oldPath, e.newPath), i]));
+        }
 
         // --- Visibility state (diff filter + name + namespace filters) ---
         // Default: in diff mode hide unchanged classes so only the changes show.
@@ -1828,6 +2033,14 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 histBack();
                 return;
             }
+            // Escape dismisses the review UI (context menu / comment form).
+            // Handled before the tag check below: cancelling a comment draft
+            // must work even while the textarea has focus.
+            if (e.key === 'Escape') {
+                closeCtxMenu();
+                hideCommentForm();
+                return;
+            }
             if (e.ctrlKey || e.metaKey || e.altKey) return;
             const tag = (e.target && e.target.tagName) || '';
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -1836,6 +2049,8 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             else if (e.key === 'p' || e.key === 'P' || e.key === 'ArrowLeft') { e.preventDefault(); navTo(-1); }
             else if (e.key === 'c' || e.key === 'C' || e.key === 'Home') { e.preventDefault(); navCenter(); }
             else if (k === 'w' || k === 'a' || k === 's' || k === 'd') { e.preventDefault(); heldKeys.add(k); }
+            else if (e.key === '[') { e.preventDefault(); stepFile(-1); }   // previous file
+            else if (e.key === ']') { e.preventDefault(); stepFile(1); }    // next file
         });
         window.addEventListener('keyup', e => {
             const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1886,6 +2101,36 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 showOnlyChanges = (diffSelect.value === 'changes');
                 applyVisibility();
             });
+
+            // Review UI: make room for the left file list, build its entries
+            // from the fileEntries computed up top, and re-measure the 3D scene
+            // for the narrower viewport (three.js re-sizes on 'resize').
+            document.body.classList.add('diffActive');
+            const fileListBody = document.getElementById('file-list-body');
+            fileEntries.forEach((e, i) => {
+                const el = document.createElement('div');
+                el.className = 'fileEntry';
+                el.dataset.idx = String(i);
+                const name = document.createElement('span');
+                name.className = 'fileEntry-name';
+                const shown = String(e.newPath || e.oldPath || (e.names && e.names[0]) || 'file');
+                name.textContent = shown.split('/').pop() || shown;
+                name.title = shown;
+                const badge = document.createElement('span');
+                badge.className = 'fileEntry-badge st-' + e.status;
+                badge.textContent = e.status;
+                el.appendChild(name);
+                el.appendChild(badge);
+                el.addEventListener('click', () => {
+                    setActiveFile(e.oldPath, e.newPath);
+                    showFileDiff(e.oldPath, e.newPath);
+                });
+                fileListBody.appendChild(el);
+            });
+            // Inline display:none wins over the CSS, so reveal it in JS (the
+            // #diffWrap pattern) after its content exists.
+            document.getElementById('file-list').style.display = '';
+            window.dispatchEvent(new Event('resize'));
         }
 
         // Minimize the controls panel to a compact bar, and back again
@@ -1912,8 +2157,20 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         };
         let activePath = null;   // the tab whose fetch is in flight / shown
         let curFiles = [];       // tab order for the focused class
-        let lastFocus = null;    // last class showDiff rendered (diff mode)
         let ignoreWhitespace = false;  // diff lines compared modulo whitespace
+
+        // --- Diff-mode render state (single-file view) ---
+        // diffSeq is a monotonic render token: every showFileDiff bumps it and a
+        // fetch that resolves after a newer request has started simply compares
+        // its captured seq against diffSeq and drops itself (replaces the old
+        // lastFocus node-guard, which couldn't track resync re-renders).
+        let diffSeq = 0;
+        let curOldPath = null;   // the two revisions currently shown in the pane
+        let curNewPath = null;
+        let curAnchors = [];     // pinned resync rows: [{o, n, row}] (see lineDiff)
+        let curOldLines = null;  // fetched source split into lines (or null)
+        let curNewLines = null;
+        let allComments = [];    // review comments loaded from GET /comments
 
         // --- Focus history: newest last, capped at 30; Ctrl-Z steps back ---
         const hist = [];
@@ -2049,15 +2306,18 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         // --- Diff-mode source: OLD | NEW side by side, changes highlighted --
-        // lineDiff: LCS alignment of two line arrays -> ops list. Each op is
-        // [oldIdx|null, newIdx|null]: same = [i,j], removed = [i,null],
-        // added = [null,j]. With ignoreWs on, lines are compared with all
-        // whitespace stripped (like `git diff -w`) — `a = 1` and `a=1` are
-        // the same line — while the original text is still rendered.
+        // LCS alignment of two already-normalized line arrays -> ops list. Each
+        // op is [oldIdx|null, newIdx|null]: same = [i,j], removed = [i,null],
+        // added = [null,j]. LINE_DIFF_CELLS caps the O(n·m) table; over budget we
+        // trim the common prefix/suffix and mark the whole middle changed
+        // (coarse, but safe). Shared by the plain diff and each resync segment.
         const LINE_DIFF_CELLS = 4000000;  // budget for the O(n·m) LCS table
-        function lineDiff(oldLines, newLines, ignoreWs) {
-            const norm = s => ignoreWs ? s.replace(/\s/g, '') : s;
-            const a = oldLines.map(norm), b = newLines.map(norm);
+        // oBase/nBase shift the emitted indices to absolute positions. a/b are
+        // either the full arrays (plain diff, base 0) or a segment slice that
+        // lineDiff passes in; lineDiff supplies the slice's starting index so the
+        // ops come out on the original coordinate system.
+        function lcsOps(a, b, oBase, nBase) {
+            const ob = oBase | 0, nb = nBase | 0;
             const n = a.length, m = b.length;
             const ops = [];
             if (n * m <= LINE_DIFF_CELLS) {
@@ -2071,12 +2331,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                             : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
                 let i = 0, j = 0;
                 while (i < n && j < m) {
-                    if (a[i] === b[j]) { ops.push([i, j]); i++; j++; }
-                    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) { ops.push([i, null]); i++; }
-                    else { ops.push([null, j]); j++; }
+                    if (a[i] === b[j]) { ops.push([i + ob, j + nb]); i++; j++; }
+                    else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) { ops.push([i + ob, null]); i++; }
+                    else { ops.push([null, j + nb]); j++; }
                 }
-                while (i < n) { ops.push([i, null]); i++; }
-                while (j < m) { ops.push([null, j]); j++; }
+                while (i < n) { ops.push([i + ob, null]); i++; }
+                while (j < m) { ops.push([null, j + nb]); j++; }
             } else {
                 // Too big for the table: trim the common prefix/suffix and
                 // mark the whole middle as changed (coarse, but safe)
@@ -2085,41 +2345,111 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 let suf = 0;
                 while (suf < n - pre && suf < m - pre &&
                        a[n - 1 - suf] === b[m - 1 - suf]) suf++;
-                for (let k = 0; k < pre; k++) ops.push([k, k]);
-                for (let k = pre; k < n - suf; k++) ops.push([k, null]);
-                for (let k = pre; k < m - suf; k++) ops.push([null, k]);
-                for (let k = 0; k < suf; k++) ops.push([n - 1 - k, m - 1 - k]);
+                for (let k = 0; k < pre; k++) ops.push([k + ob, k + nb]);
+                for (let k = pre; k < n - suf; k++) ops.push([k + ob, null]);
+                for (let k = pre; k < m - suf; k++) ops.push([null, k + nb]);
+                for (let k = 0; k < suf; k++) ops.push([n - 1 - k + ob, m - 1 - k + nb]);
+            }
+            return ops;
+        }
+
+        // lineDiff: LCS alignment of two line arrays -> ops list (same op shape
+        // as lcsOps). With ignoreWs on, lines are compared with all whitespace
+        // stripped (like `git diff -w`) — `a = 1` and `a=1` are the same line —
+        // while the original text is still rendered.
+        //
+        // `anchors` (default []) are resync pins: each is {op, np, row}, where
+        // op/np are the counts of old/new lines ABOVE that row and row is one of
+        // 'dl-same' | 'dl-del' | 'dl-add'. Each pin forces its row to appear at
+        // exactly that position and lets the LCS run independently on the segment
+        // above and below it, so a single pinned line can override a bad global
+        // alignment. Pins are sorted by position and de-duplicated defensively.
+        function lineDiff(oldLines, newLines, ignoreWs, anchors) {
+            const norm = s => ignoreWs ? s.replace(/\s/g, '') : s;
+            const a = oldLines.map(norm), b = newLines.map(norm);
+            const n = a.length, m = b.length;
+
+            const pins = (anchors || [])
+                .filter(p => Number.isFinite(p.op) && Number.isFinite(p.np)
+                             && p.op >= 0 && p.op <= n && p.np >= 0 && p.np <= m)
+                .sort((x, y) => (x.op - y.op) || (x.np - y.np));
+            const seen = new Set();
+            const uniq = [];
+            for (const p of pins) {
+                const k = p.op + ',' + p.np;
+                if (!seen.has(k)) { seen.add(k); uniq.push(p); }
+            }
+
+            const ops = [];
+            let o0 = 0, n0 = 0;   // running segment start (old index, new index)
+            for (const p of uniq) {
+                // Clamp any out-of-order pin to the running position (a no-op
+                // segment) so a stale/malformed anchor can't corrupt the diff.
+                const op = Math.max(o0, p.op);
+                const np = Math.max(n0, p.np);
+                ops.push(...lcsOps(a.slice(o0, op), b.slice(n0, np), o0, n0));
+                // The pinned row consumes an old line unless it is an added row,
+                // and a new line unless it is a removed row.
+                const consumesOld = p.row !== 'dl-add';
+                const consumesNew = p.row !== 'dl-del';
+                ops.push([consumesOld ? op : null, consumesNew ? np : null]);
+                o0 = op + (consumesOld ? 1 : 0);
+                n0 = np + (consumesNew ? 1 : 0);
+            }
+            if (o0 < n || n0 < m) {
+                ops.push(...lcsOps(a.slice(o0), b.slice(n0), o0, n0));
             }
             return ops;
         }
 
         // One aligned row: line number + highlighted source, so keywords and
         // types keep their colors and known type names stay clickable (the
-        // delegated #pane-code handler covers these rows too).
-        function renderLine(line, status, ln) {
-            return '<div class="dl ' + status + '"><span class="dl-ln">' + ln +
-                '</span><span class="dl-src">' + highlight(line) + '</span></div>';
+        // delegated #pane-code handler covers these rows too). data-o/data-n are
+        // the counts of old/new lines ABOVE this row; together they uniquely
+        // identify the row, so resync anchors and comment markers can find it.
+        function renderLine(line, status, ln, dataO, dataN) {
+            return '<div class="dl ' + status + '" data-o="' + dataO
+                + '" data-n="' + dataN + '"><span class="dl-ln">' + ln
+                + '</span><span class="dl-src">' + highlight(line) + '</span></div>';
         }
 
         // Build the two-column view from the alignment ops. `lines` may be
-        // null for a class absent from that revision (added / removed).
-        function diffColumns(oldLines, newLines, oldPath, newPath) {
-            const ops = lineDiff(oldLines || [], newLines || [], ignoreWhitespace);
+        // null for a class absent from that revision (added / removed). Every
+        // row — gaps included — stamps the running prefix that identifies it.
+        function diffColumns(oldLines, newLines, oldPath, newPath, anchors) {
+            const ops = lineDiff(oldLines || [], newLines || [], ignoreWhitespace, anchors);
+            // Precompute each row's identity stamp, once. data-o / data-n are the
+            // 1-based old/new line number the row lands on (old/new lines
+            // consumed above it, plus one). They depend only on the op sequence,
+            // so both columns stamp the same row identically — which is what lets
+            // a resync pin or a comment marker find the row by (data-o, data-n).
+            const oStamp = [], nStamp = [];
+            let oPref = 0, nPref = 0;
+            for (const [oi, ni] of ops) {
+                oStamp.push(oPref + 1);
+                nStamp.push(nPref + 1);
+                if (oi !== null) oPref++;
+                if (ni !== null) nPref++;
+            }
             const col = (lines, path, side) => {
                 const head = path ? esc(path)
                     : '<span class="diff-col-none">' + esc(side === 'old'
                         ? 'added — no file in old revision'
                         : 'removed — no file in new revision') + '</span>';
                 let body = '';
-                for (const [oi, ni] of ops) {
+                for (let k = 0; k < ops.length; k++) {
+                    const [oi, ni] = ops[k];
+                    const o = oStamp[k], n = nStamp[k];
                     if (side === 'old') {
-                        if (oi === null) body += '<div class="dl dl-gap"></div>';
+                        if (oi === null) body +=
+                            '<div class="dl dl-gap" data-o="' + o + '" data-n="' + n + '"></div>';
                         else body += renderLine(lines[oi],
-                            ni === null ? 'dl-del' : 'dl-same', oi + 1);
+                            ni === null ? 'dl-del' : 'dl-same', oi + 1, o, n);
                     } else {
-                        if (ni === null) body += '<div class="dl dl-gap"></div>';
+                        if (ni === null) body +=
+                            '<div class="dl dl-gap" data-o="' + o + '" data-n="' + n + '"></div>';
                         else body += renderLine(lines[ni],
-                            oi === null ? 'dl-add' : 'dl-same', ni + 1);
+                            oi === null ? 'dl-add' : 'dl-same', ni + 1, o, n);
                     }
                 }
                 return '<div class="diff-col"><div class="diff-col-head">' + head + '</div>'
@@ -2130,11 +2460,50 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 + col(newLines, newPath, 'new') + '</div>';
         }
 
-        // Fetch both revisions of the focused class (where they exist) and
-        // render the side-by-side diff. lastFocus guards against a slow fetch
-        // resolving after the user has focused something else.
+        // Whether review comments have already been fetched for this page.
+        // Shared across files (GET /comments is global), so load at most once.
+        let commentsLoaded = false;
+
+        // Render the current file pair with its pinned anchors, then (re)draw the
+        // review-comment badges over the fresh rows. Called after any state
+        // change: a fetch landing, a resync, or the ignore-whitespace toggle.
+        function renderDiffNow() {
+            paneEl.code.innerHTML = diffColumns(
+                curOldLines, curNewLines, curOldPath, curNewPath, curAnchors);
+            renderCommentMarkers();
+        }
+
+        // Fetch both revisions of `oldPath`/`newPath` (where they exist) and
+        // render the side-by-side diff. A monotonic seq guards against a slow
+        // fetch resolving after a newer request (resync / file switch) has
+        // started — the old lastFocus node-guard could not track re-renders.
+        function showFileDiff(oldPath, newPath, opts) {
+            const seq = ++diffSeq;
+            curOldPath = oldPath;
+            curNewPath = newPath;
+            curAnchors = (opts && opts.anchors) ? opts.anchors.slice() : [];
+            loadComments();
+            paneEl.code.innerHTML = '<span class="syn-placeholder">loading old and new source…</span>';
+            const load = p => p
+                ? fetch('/source?path=' + encodeURIComponent(p))
+                      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                : Promise.resolve(null);
+            Promise.all([load(oldPath), load(newPath)]).then(([oldText, newText]) => {
+                if (seq !== diffSeq) return;   // superseded by a newer request
+                curOldLines = oldText === null ? null : oldText.split(/\r?\n/);
+                curNewLines = newText === null ? null : newText.split(/\r?\n/);
+                renderDiffNow();
+            }).catch(() => {
+                if (seq !== diffSeq) return;
+                setPlaceholder('source not available for this class');
+            });
+        }
+
+        // Focus entry point (called from updatePane). Resolves the class's file
+        // pair and hands off to showFileDiff; keeps the no-file / external-stub
+        // branches. Anchors reset on a new focus (the "cleared on file switch"
+        // rule — a stale pin from another file would corrupt the alignment).
         function showDiff(n) {
-            lastFocus = n;
             paneEl.tabs.style.display = 'none';
             const c = n.cls;
             if (!c) { setPlaceholder('external class — no source file in this model'); return; }
@@ -2146,27 +2515,64 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             const oldPath = fileOf(oldMerged);
             const newPath = fileOf(newMerged);
             if (!oldPath && !newPath) { setPlaceholder('no source file recorded for this class'); return; }
-            paneEl.code.innerHTML = '<span class="syn-placeholder">loading old and new source…</span>';
-            const load = p => p
-                ? fetch('/source?path=' + encodeURIComponent(p))
-                      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-                : Promise.resolve(null);
-            Promise.all([load(oldPath), load(newPath)]).then(([oldText, newText]) => {
-                if (lastFocus !== n) return;   // superseded by a newer focus
-                paneEl.code.innerHTML = diffColumns(
-                    oldText === null ? null : oldText.split(/\r?\n/),
-                    newText === null ? null : newText.split(/\r?\n/),
-                    oldPath, newPath);
-            }).catch(() => {
-                if (lastFocus !== n) return;
-                setPlaceholder('source not available for this class');
-            });
+            setActiveFile(oldPath, newPath);
+            showFileDiff(oldPath, newPath);
         }
 
-        // Re-diff the current focus when the ignore-whitespace toggle flips
+        // Highlight the file-list entry matching the current file pair (or clear
+        // the highlight if none). The .fileEntry elements are built in the same
+        // order as fileEntries, so the fileIndex value is their array position.
+        function setActiveFile(oldPath, newPath) {
+            if (!DIFF_MODE) return;
+            const idx = fileIndex.get(fileKeyOf(oldPath, newPath));
+            document.querySelectorAll('#file-list-body .fileEntry').forEach((el, i) =>
+                el.classList.toggle('active', i === idx));
+        }
+
+        // Pin the clicked row as an alignment anchor and re-render. The row's
+        // data-o/data-n are 1-based line numbers; the anchor stores the 0-based
+        // counts above it (op/np) plus the row kind, matching lineDiff's pin.
+        function resyncHere(rowEl) {
+            if (!rowEl || rowEl.classList.contains('dl-gap')) return;
+            const dataO = parseInt(rowEl.getAttribute('data-o'), 10) || 0;
+            const dataN = parseInt(rowEl.getAttribute('data-n'), 10) || 0;
+            let cls = 'dl-same';
+            if (rowEl.classList.contains('dl-add')) cls = 'dl-add';
+            else if (rowEl.classList.contains('dl-del')) cls = 'dl-del';
+            curAnchors.push({ op: dataO - 1, np: dataN - 1, row: cls });
+            renderDiffNow();
+            scrollToAnchor(dataO, dataN);
+        }
+
+        function clearResync() {
+            if (!curAnchors.length) return;
+            curAnchors = [];
+            renderDiffNow();
+        }
+
+        // After a resync, center the newly pinned row and flash it so the user
+        // can see where the alignment re-anchored. It re-queries the fresh DOM
+        // by (data-o, data-n): the row we clicked is gone after the re-render.
+        function scrollToAnchor(o, n) {
+            for (const r of paneEl.code.querySelectorAll('.dl')) {
+                if (parseInt(r.getAttribute('data-o'), 10) === o
+                    && parseInt(r.getAttribute('data-n'), 10) === n) {
+                    r.scrollIntoView({ block: 'center' });
+                    r.classList.add('anchor-flash');
+                    const clear = () => r.classList.remove('anchor-flash');
+                    r.addEventListener('animationend', clear, { once: true });
+                    setTimeout(clear, 1400);   // fallback if animationend never fires
+                    return;
+                }
+            }
+        }
+
+        // Re-diff the current focus when the ignore-whitespace toggle flips.
+        // `.diff-split` is present exactly when a diff is on screen, so this is
+        // a no-op on a placeholder (external class / no recorded source).
         document.getElementById('ignoreWs').addEventListener('change', e => {
             ignoreWhitespace = e.target.checked;
-            if (DIFF_MODE && lastFocus) showDiff(lastFocus);
+            if (DIFF_MODE && paneEl.code.querySelector('.diff-split')) renderDiffNow();
         });
 
         // --- Focused class: title, clickable member types, tabs ------------
@@ -2242,6 +2648,273 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             if (t && nodes.has(t)) focusOn(nodes.get(t));
         });
 
+        // =====================================================================
+        // Diff-mode review UI: context menu, comment badges / form, file stepping
+        // (diff mode only — guarded so a single-input page never wires these).
+        // #ctxMenu and #commentForm live after this <script>, so they are read
+        // lazily inside the functions below, never cached at load time.
+        // =====================================================================
+
+        // --- Review comments ------------------------------------------------
+        // Load the shared store once; badges and the export button read allComments.
+        function loadComments() {
+            if (commentsLoaded) return;
+            commentsLoaded = true;
+            fetch('/comments')
+                .then(r => r.ok ? r.json() : null)
+                .then(j => {
+                    allComments = (j && Array.isArray(j.comments)) ? j.comments : [];
+                    renderCommentMarkers();
+                })
+                .catch(() => { commentsLoaded = false; });   // retry on a later focus
+        }
+
+        // Comments that apply to the file pair currently on screen: a comment's
+        // file matches whichever revision it was anchored to (a removed line
+        // carries the old path, an added line the new path).
+        function commentsForFile() {
+            if (!curOldPath && !curNewPath) return [];
+            return allComments.filter(c =>
+                c.file === curOldPath || c.file === curNewPath);
+        }
+
+        // Draw a badge on the row each comment points at. A comment's (oldLine,
+        // newLine) maps to a unique (data-o, data-n) row: newLine>0 matches the
+        // new-column line (optionally cross-checked with oldLine); a removed
+        // line (newLine==0) matches the old-column line. Several comments on the
+        // same row share one badge (its text is the count, its title the list).
+        function renderCommentMarkers() {
+            const list = commentsForFile();
+            // Idempotent: clear any badges from an earlier pass first. This
+            // function runs after every re-render AND when the comment fetch
+            // lands (which may follow a render with no DOM reset between), so
+            // without this the same row would accumulate a second badge.
+            paneEl.code.querySelectorAll('.cm-badge').forEach(b => b.remove());
+            if (!list.length) return;
+            const rows = Array.from(paneEl.code.querySelectorAll('.dl:not(.dl-gap)'));
+            const resolve = c => {
+                for (const r of rows) {
+                    const o = parseInt(r.getAttribute('data-o'), 10);
+                    const n = parseInt(r.getAttribute('data-n'), 10);
+                    if (c.newLine > 0 && n === c.newLine
+                        && (c.oldLine === 0 || o === c.oldLine)) return r;
+                    if (c.newLine === 0 && c.oldLine > 0 && o === c.oldLine) return r;
+                }
+                return null;
+            };
+            const groups = new Map();
+            for (const c of list) {
+                const row = resolve(c);
+                if (!row) continue;                 // alignment moved it; don't guess
+                if (!groups.has(row)) groups.set(row, []);
+                groups.get(row).push(c);
+            }
+            for (const [row, cs] of groups) {
+                const b = document.createElement('span');
+                b.className = 'cm-badge';
+                b.textContent = String(cs.length);
+                b.title = cs.map(c => (c.text || '') + (c.created ? ' — ' + c.created : ''))
+                    .join('\n');
+                row.appendChild(b);
+            }
+        }
+
+        // The comment payload for a row, by its column: an added line anchors to
+        // the new path (oldLine 0), a removed one to the old path (newLine 0), a
+        // matched line to the new path with both 1-based line numbers.
+        function commentPayload(rowEl) {
+            const o = parseInt(rowEl.getAttribute('data-o'), 10) || 0;
+            const n = parseInt(rowEl.getAttribute('data-n'), 10) || 0;
+            if (rowEl.classList.contains('dl-add')) {
+                return { file: curNewPath || curOldPath, oldLine: 0, newLine: n };
+            }
+            if (rowEl.classList.contains('dl-del')) {
+                return { file: curOldPath || curNewPath, oldLine: o, newLine: 0 };
+            }
+            return { file: curNewPath || curOldPath, oldLine: o, newLine: n };
+        }
+
+        let pendingComment = null;   // the {file, oldLine, newLine} for the open form
+
+        // Position and show the floating comment form beside the row (clamped to
+        // the viewport) and remember which line it will be anchored to.
+        function addCommentHere(rowEl) {
+            if (!rowEl || rowEl.classList.contains('dl-gap')) return;
+            wireCommentForm();
+            const form = document.getElementById('commentForm');
+            if (!form) return;
+            const p = commentPayload(rowEl);
+            pendingComment = p;
+            document.getElementById('cfMeta').textContent =
+                (p.file ? p.file : '(no file)')
+                + ' — line ' + (p.newLine > 0 ? p.newLine : p.oldLine)
+                + (p.newLine > 0 && p.oldLine > 0 ? ' (old L' + p.oldLine + ')' : '');
+            document.getElementById('cfText').value = '';
+            document.getElementById('cfErr').textContent = '';
+            form.style.left = '0px';
+            form.style.top = '0px';
+            form.style.display = 'block';
+            const vw = window.innerWidth, vh = window.innerHeight;
+            const fw = form.offsetWidth || 340, fh = form.offsetHeight || 200;
+            const rc = rowEl.getBoundingClientRect();
+            let left = rc.right + 8;
+            if (left + fw > vw - 8) left = Math.max(8, rc.left - fw - 8);
+            const top = Math.max(8, Math.min(rc.top, vh - fh - 8));
+            form.style.left = left + 'px';
+            form.style.top = top + 'px';
+            setTimeout(() => document.getElementById('cfText').focus(), 0);
+        }
+
+        function hideCommentForm() {
+            const form = document.getElementById('commentForm');
+            if (form) form.style.display = 'none';
+            pendingComment = null;
+        }
+
+        let commentFormWired = false;
+        // #cfSubmit / #cfCancel are after this <script>, so attach their handlers
+        // the first time the form is used, not at load.
+        function wireCommentForm() {
+            if (commentFormWired) return;
+            commentFormWired = true;
+            document.getElementById('cfSubmit').addEventListener('click', submitComment);
+            document.getElementById('cfCancel').addEventListener('click', hideCommentForm);
+            document.getElementById('cfText').addEventListener('keydown', e => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitComment();
+            });
+        }
+
+        function submitComment() {
+            const textEl = document.getElementById('cfText');
+            const errEl = document.getElementById('cfErr');
+            const val = textEl.value;
+            if (!val.trim()) { errEl.textContent = 'Enter a comment before submitting.'; return; }
+            if (!pendingComment) { hideCommentForm(); return; }
+            errEl.textContent = '';
+            const body = {
+                file: pendingComment.file || '',
+                oldLine: pendingComment.oldLine,
+                newLine: pendingComment.newLine,
+                text: val
+            };
+            fetch('/comments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            }).then(async r => {
+                let j = null;
+                try { j = await r.json(); } catch (e) { /* non-JSON body */ }
+                if (r.status === 201) {
+                    allComments.push(j || body);
+                    hideCommentForm();
+                    renderCommentMarkers();
+                } else {
+                    errEl.textContent = (j && j.error)
+                        ? j.error : 'submit failed (HTTP ' + r.status + ')';
+                }
+            }).catch(() => { errEl.textContent = 'Could not reach the server.'; });
+        }
+
+        // --- Context menu ---------------------------------------------------
+        const ctxMenuEl = () => document.getElementById('ctxMenu');
+        let ctxTargetRow = null;    // the .dl row the menu was opened on (or null)
+
+        function closeCtxMenu() {
+            const menu = ctxMenuEl();
+            if (menu) menu.style.display = 'none';
+            ctxTargetRow = null;
+        }
+
+        function ctxItem(label, enabled, fn) {
+            const d = document.createElement('div');
+            d.className = 'ctxItem' + (enabled ? '' : ' disabled');
+            d.textContent = label;
+            if (enabled) d.addEventListener('click', () => { closeCtxMenu(); fn(); });
+            return d;
+        }
+        const ctxSep = () => {
+            const d = document.createElement('div');
+            d.className = 'ctxSep';
+            return d;
+        };
+
+        // Build and show the menu at (x, y), clamped to the viewport. `rowEl` is
+        // the diff row (or null when right-clicking a gap / non-row), which
+        // enables the row-specific items.
+        function openCtxMenu(x, y, rowEl) {
+            const menu = ctxMenuEl();
+            if (!menu) return;
+            ctxTargetRow = rowEl;
+            const hasRow = !!rowEl;
+            const many = fileEntries.length >= 2;
+            menu.innerHTML = '';
+            menu.appendChild(ctxItem('Resync here', hasRow, () => resyncHere(ctxTargetRow)));
+            menu.appendChild(ctxItem('Clear resync', curAnchors.length > 0, () => clearResync()));
+            menu.appendChild(ctxSep());
+            menu.appendChild(ctxItem('Previous file  [', many, () => stepFile(-1)));
+            menu.appendChild(ctxItem('Next file  ]', many, () => stepFile(1)));
+            menu.appendChild(ctxItem('Add comment here', hasRow, () => addCommentHere(ctxTargetRow)));
+            menu.appendChild(ctxSep());
+            const exp = document.createElement('a');
+            exp.className = 'ctxItem';
+            exp.href = '/export/review';
+            exp.download = 'review.md';
+            exp.textContent = 'Export review…';
+            menu.appendChild(exp);
+            menu.style.display = 'block';
+            const mw = menu.offsetWidth, mh = menu.offsetHeight;
+            let left = x, top = y;
+            if (left + mw > window.innerWidth - 4) left = Math.max(4, window.innerWidth - mw - 4);
+            if (top + mh > window.innerHeight - 4) top = Math.max(4, window.innerHeight - mh - 4);
+            menu.style.left = left + 'px';
+            menu.style.top = top + 'px';
+            wireCtxDismiss();
+        }
+
+        let ctxDismissWired = false;
+        function wireCtxDismiss() {
+            if (ctxDismissWired) return;
+            ctxDismissWired = true;
+            // Capture-phase mousedown outside the menu dismisses it (beats the
+            // click that would otherwise activate an item). Escape is handled in
+            // the global keydown listener.
+            document.addEventListener('mousedown', e => {
+                const menu = ctxMenuEl();
+                if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) {
+                    closeCtxMenu();
+                }
+            }, true);
+            window.addEventListener('resize', closeCtxMenu);
+            window.addEventListener('blur', closeCtxMenu);
+            window.addEventListener('scroll', closeCtxMenu, true);
+        }
+
+        // --- File stepping (next / previous) --------------------------------
+        // Cycle to the adjacent file in the list (wrapping). `dir` is -1 for
+        // previous, +1 for next. Resets anchors (a pin belongs to one file).
+        function stepFile(dir) {
+            if (fileEntries.length < 2) return;
+            const cur = fileIndex.get(fileKeyOf(curOldPath, curNewPath));
+            let i;
+            if (cur === undefined) i = (dir > 0) ? 0 : fileEntries.length - 1;
+            else i = (cur + dir + fileEntries.length) % fileEntries.length;
+            const e = fileEntries[i];
+            setActiveFile(e.oldPath, e.newPath);
+            showFileDiff(e.oldPath, e.newPath);
+        }
+
+        // Right-click a diff row for the review context menu (diff mode only).
+        // Delegated on the stable #pane-code element, like the click handler, so
+        // it survives every innerHTML re-render.
+        paneEl.code.addEventListener('contextmenu', e => {
+            if (!DIFF_MODE) return;
+            if (!paneEl.code.querySelector('.diff-split')) return;   // no diff on screen
+            e.preventDefault();
+            const row = (e.target && e.target.closest) ? e.target.closest('.dl') : null;
+            openCtxMenu(e.clientX, e.clientY,
+                row && !row.classList.contains('dl-gap') ? row : null);
+        });
+
         // --- Drag the top handle to resize the pane (clamped 15%–80%) ------
         let paneDragging = false;
         document.getElementById('pane-handle').addEventListener('mousedown', e => {
@@ -2266,6 +2939,19 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             document.body.style.cursor = '';
         });
     </script>
+
+    <div id="ctxMenu" role="menu" style="display:none"></div>
+
+    <div id="commentForm" role="dialog" style="display:none">
+        <div class="cf-head">New review comment</div>
+        <div class="cf-meta" id="cfMeta"></div>
+        <textarea id="cfText" placeholder="Describe your review comment&hellip;"></textarea>
+        <div class="cf-btns">
+            <button type="button" id="cfSubmit" class="cf-submit">Submit</button>
+            <button type="button" id="cfCancel" class="cf-cancel">Cancel</button>
+        </div>
+        <div class="cf-err" id="cfErr"></div>
+    </div>
 </body>
 </html>)HTMLDOC";
 

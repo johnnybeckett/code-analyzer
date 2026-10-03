@@ -5,18 +5,24 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
+
+#include "server/review_store.h"
 
 namespace server {
 
 /**
  * @brief A minimal Boost.Beast HTTP server that serves the UML model page.
  *
- * Serves two things, and nothing else:
- *   - the fully-built UML viewer HTML (received as an opaque body string) on
- *     any other GET, and
- *   - `GET /source?path=...` — the raw source of a class, looked up exactly
+ * Serves the fully-built UML viewer HTML (received as an opaque body string)
+ * on any unmatched GET, plus a small set of routes:
+ *   - `GET  /source?path=...` — the raw source of a class, looked up exactly
  *     (percent-decoded) against the allowlist of source files it was handed.
+ *   - `GET  /comments` — the review comments as JSON (empty list if the store
+ *     is null, i.e. single-input mode).
+ *   - `POST /comments` — add a review comment (201, or 400/500 on error).
+ *   - `GET  /export/review` — the review rendered as a Markdown download.
  *
  * It knows nothing about *how* the page was built (that is UmlModel's job); it
  * simply returns the bytes it was handed. This keeps the server reusable and
@@ -24,7 +30,9 @@ namespace server {
  *
  * The `/source` route is an allowlist, not a filesystem: `path` is matched
  * against the preloaded source map, never used to build a path, so the query
- * cannot escape the set of files the caller chose to expose.
+ * cannot escape the set of files the caller chose to expose. The review routes
+ * operate on the shared `ReviewStore` (owned via a `shared_ptr`) and the same
+ * preloaded source map — they never read the filesystem themselves.
  *
  * It runs a single-threaded, async io_context that can serve many concurrent
  * clients, but each connection is deliberately simple request/response with
@@ -40,6 +48,12 @@ public:
      *        served; everything else on that route is a 404.
      * @param port TCP port to bind on 0.0.0.0; 0 lets the OS pick an ephemeral
      *             port (read it back via local_port() — used by the tests).
+     * @param review Shared review-comment store backing `/comments` and
+     *        `/export/review`. `nullptr` (the default) disables review: GET
+     *        `/comments` returns an empty list, POST returns 400, and export
+     *        renders an empty document — the right shape for single-input mode.
+     * @param title A human title (e.g. "old.json -> new.json") shown in the
+     *        Markdown export header. Empty in single-input mode.
      *
      * The listener is opened/bound/listened immediately so local_port() is valid
      * before run().
@@ -49,7 +63,9 @@ public:
      */
     UmlServer(std::string body,
               std::map<std::string, std::string> sources,
-              std::uint16_t port);
+              std::uint16_t port,
+              std::shared_ptr<ReviewStore> review = nullptr,
+              std::string title = {});
 
     ~UmlServer();
 
@@ -76,6 +92,8 @@ private:
 
     std::string body_;
     std::map<std::string, std::string> sources_;
+    std::shared_ptr<ReviewStore> review_;
+    std::string title_;
     boost::asio::io_context io_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::uint16_t assigned_port_{0};
