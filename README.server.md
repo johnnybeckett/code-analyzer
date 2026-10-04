@@ -32,8 +32,7 @@ cmake ..
 make
 ```
 
-This creates the UML model server (`UmlServer`) alongside the code analyzer (`CodeAnalyzer`)
-and the file-based UML generator (`UMLGenerator`).
+This creates the UML model server (`UmlServer`) alongside the code analyzer (`CodeAnalyzer`).
 
 ## Usage
 

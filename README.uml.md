@@ -1,21 +1,26 @@
-# UML Generator Tool
+# UML Model Viewer
 
-A tool that converts JSON output from the code analyzer into interactive 3D UML class diagrams.
+An interactive 3D UML class-diagram viewer built from the code analyzer's JSON output.
+The page is assembled by the `code_analyzer_uml` library (class loading + template
+splicing) and served over HTTP by **`UmlServer`** — see
+[README.server.md](README.server.md) for the full server reference (routes, CLI,
+source-access allowlist).
 
 ## Features
 
 - **Interactive 3D Visualization**: Explore class relationships in a 3D space with rotation, zooming, panning, and keyboard movement
 - **Filtering Capabilities**: Hide classes by name regex and/or namespace regex
 - **Responsive at Scale**: Only the classes closest to the camera are drawn, so diagrams with thousands of classes stay smooth
-- **Self-contained HTML Output**: Generates a complete HTML file with embedded visualization
-- **Multiple Input Support**: Can process multiple JSON input files
-- **Source Pane**: A resizable bottom pane shows the focused class's real source code (fetched
-  from `UmlServer` when served over HTTP) with theme-matched syntax highlighting, plus tabs for
-  the class's own file and the files of the classes it references
+- **Served, not written to disk**: `UmlServer` serves the complete page (embedded
+  three.js, no external assets) over HTTP
+- **Source Pane**: A resizable bottom pane shows the focused class's real source code,
+  fetched on demand from `UmlServer`'s `/source` route, with theme-matched syntax
+  highlighting and tabs for the class's own file and the files of the classes it references
 
 ## Building
 
-The UML generator is built as part of the main project. To build everything:
+The viewer page is served by the UML model server, built as part of the main project.
+To build everything:
 
 ```bash
 mkdir build && cd build
@@ -23,28 +28,28 @@ cmake ..
 make
 ```
 
-This will create both the main code analyzer (`CodeAnalyzer`) and the UML generator (`UMLGenerator`).
+This creates the code analyzer (`CodeAnalyzer`) and the UML model server (`UmlServer`).
 
 ## Usage
 
 ### Basic Usage
 
 ```bash
-# Generate UML diagram from JSON files
-./UMLGenerator data1.json data2.json
+# Serve a single analyzer JSON file on the default port (8000)
+./UmlServer data.json
 
-# Generate UML diagram with class filtering
-./UMLGenerator --hide "^(std::|Test$)" data.json
+# Choose a port
+./UmlServer --port 9000 data.json
+
+# Serve with class filtering (diff mode: older newer)
+./UmlServer --port 9000 --hide "^(std::|Test$)" older.json newer.json
 ```
 
 ### Options
 
+- `--port <n>`: TCP port to listen on (default `8000`)
 - `--hide <regex>`: Hide classes matching the specified regex pattern
 - `-h, --help`: Show help message
-
-## Output
-
-The tool generates a file called `uml_diagram.html` that contains the interactive 3D visualization. Open this file in any modern web browser to explore the class diagrams.
 
 ## Visualization Features
 
@@ -83,9 +88,7 @@ The tool generates a file called `uml_diagram.html` that contains the interactiv
      numbers colored from the active theme's tokens, so switching themes recolors the code for free
    - **Click a member variable's type** in the pane to jump focus to that class (and back with
      **Ctrl-Z**); clicking a tab opens that file
-   - When served by `UmlServer` the code is fetched on demand via `GET /source?path=...`; in a
-     page opened directly from a file (`file://`) the tabs show a "source not available"
-     placeholder instead
+   - The code is fetched on demand via `GET /source?path=...` from `UmlServer` (allowlist-guarded)
 
 7. **Legend**:
    - Blue boxes: Classes
@@ -95,11 +98,13 @@ The tool generates a file called `uml_diagram.html` that contains the interactiv
 ## Example
 
 ```bash
-# First run the code analyzer to generate JSON output
+# 1. Run the code analyzer to produce JSON output
 ./CodeAnalyzer --json analysis.json /path/to/project
 
-# Then convert it to UML diagram
-./UMLGenerator analysis.json
+# 2. Serve the viewer page over HTTP
+./UmlServer --port 8000 analysis.json
+
+# 3. Open http://localhost:8000/ in a browser
 ```
 
-The resulting `uml_diagram.html` file will contain an interactive 3D visualization of your project's class structure.
+The served page contains an interactive 3D visualization of your project's class structure.

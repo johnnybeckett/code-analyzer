@@ -27,9 +27,8 @@ CMakeCache.txt
 CMakeFiles/
 Makefile
 
-# Generated analyzer / UML / docs outputs
+# Generated analyzer / docs outputs
 analysis.json
-uml_diagram.html
 code_analyzer_docs.html
 
 # Local Claude Code session state

@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "server/rest_handler.h"
 #include "server/review_store.h"
 
 namespace server {
@@ -97,6 +98,11 @@ private:
     boost::asio::io_context io_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::uint16_t assigned_port_{0};
+    // Declared last: destroyed FIRST (members die in reverse declaration order),
+    // so the handlers it owns are destroyed before the state they point at
+    // (sources_/review_/title_, declared above). That is the safe order — the
+    // handlers never outlive the state, so no dangling pointer on shutdown.
+    Router router_;
 };
 
 }  // namespace server

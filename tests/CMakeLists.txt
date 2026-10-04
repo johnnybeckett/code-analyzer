@@ -5,6 +5,9 @@ add_executable(code_analyzer_tests
     gtest/main_test.cpp
     ${CMAKE_SOURCE_DIR}/src/server/uml_server.cpp
     ${CMAKE_SOURCE_DIR}/src/server/review_store.cpp
+    ${CMAKE_SOURCE_DIR}/src/server/http_util.cpp
+    ${CMAKE_SOURCE_DIR}/src/server/rest_handlers.cpp
+    ${CMAKE_SOURCE_DIR}/src/server/openapi.cpp
     gtest/registry_test.cpp
     gtest/provider_test.cpp
     gtest/observer_test.cpp
@@ -12,6 +15,7 @@ add_executable(code_analyzer_tests
     gtest/uml_test.cpp
     gtest/uml_model_test.cpp
     gtest/uml_server_test.cpp
+    gtest/openapi_spec_test.cpp
     gtest/render_route_test.cpp
     gtest/cmake_analyzer_test.cpp
     gtest/thread_pool_test.cpp

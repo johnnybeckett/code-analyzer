@@ -45,19 +45,13 @@ add_executable(${PROJECT_NAME}
 )
 
 # UML model library: class loading + template splicing + the shared UmlModel
-# facade. Consumed by both the file-based generator and the HTTP server, so the
-# "files -> spliced HTML" logic lives in one place. (template.h carries the
-# embedded HTML/JS page.)
+# facade. Consumed by the HTTP server (and the test suite), so the "files ->
+# spliced HTML" logic lives in one place. (template.h carries the embedded
+# HTML/JS page the server serves.)
 add_library(code_analyzer_uml STATIC
     src/uml/class_loader.cpp
     src/uml/template_renderer.cpp
     src/uml/uml_model.cpp
-)
-
-# Add UML generator executable (thin entry point over the UML model library)
-add_executable(UMLGenerator
-    src/uml/main.cpp
-    src/uml/uml_generator.cpp
 )
 
 # UML model HTTP server (thin entry point + Boost.Beast handler over the model
@@ -67,6 +61,9 @@ add_executable(UmlServer
     src/server/main.cpp
     src/server/uml_server.cpp
     src/server/review_store.cpp
+    src/server/http_util.cpp
+    src/server/rest_handlers.cpp
+    src/server/openapi.cpp
 )
 
 # Add documentation generator executable
@@ -100,11 +97,6 @@ target_link_libraries(code_analyzer_uml PUBLIC
 # Production binary: links only the core library (no test framework).
 target_link_libraries(${PROJECT_NAME} PRIVATE
     code_analyzer_core
-)
-
-# UML generator: thin entry point; the model/splice logic comes from the library.
-target_link_libraries(UMLGenerator
-    code_analyzer_uml
 )
 
 # UML server: model page from the library; Asio's thread support needs Threads.
