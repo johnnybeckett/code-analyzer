@@ -3,9 +3,11 @@
 #include <boost/json.hpp>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace uml {
 
@@ -102,6 +104,113 @@ std::vector<std::string> JsonClassLoader::parseFileSources(const std::string& fi
     }
 
     return sources;
+}
+
+std::vector<std::string> JsonClassLoader::parseFileSourcesList(const std::string& filename) {
+    std::vector<std::string> sources;
+    std::set<std::string> seen;
+    namespace json = boost::json;
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        return sources;
+    }
+
+    boost::system::error_code ec;
+    json::value root = json::parse(file, ec);
+    if (ec) {
+        return sources;
+    }
+
+    if (!root.is_object() || !root.as_object().contains("sources")
+        || !root.as_object().at("sources").is_array()) {
+        return sources;
+    }
+
+    for (const auto& v : root.as_object().at("sources").as_array()) {
+        if (!v.is_string()) {
+            continue;
+        }
+        const auto s = v.as_string();
+        const std::string path(s.data(), s.size());
+        if (path.empty()) {
+            continue;
+        }
+        if (seen.insert(path).second) {
+            sources.push_back(path);
+        }
+    }
+
+    return sources;
+}
+
+std::string JsonClassLoader::parseFileCmakeJSON(const std::string& filename) {
+    namespace json = boost::json;
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        return "[]";
+    }
+
+    boost::system::error_code ec;
+    json::value root = json::parse(file, ec);
+    if (ec) {
+        return "[]";
+    }
+
+    if (!root.is_object() || !root.as_object().contains("cmake")
+        || !root.as_object().at("cmake").is_array()) {
+        return "[]";
+    }
+
+    json::array out;
+    for (const auto& t : root.as_object().at("cmake").as_array()) {
+        if (t.is_object()) {
+            out.emplace_back(t);
+        }
+    }
+    return json::serialize(out);
+}
+
+std::string JsonClassLoader::parseCmakeMerged(const std::vector<std::string>& files) {
+    namespace json = boost::json;
+
+    // name -> target object. operator[] (not emplace) so a same-named target
+    // in a later file overrides the earlier one. std::map keeps the output
+    // sorted by name, so the splice is deterministic across runs and hosts.
+    std::map<std::string, json::object> byName;
+    for (const auto& filename : files) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            continue;
+        }
+        boost::system::error_code ec;
+        json::value root = json::parse(file, ec);
+        if (ec || !root.is_object()) {
+            continue;
+        }
+        auto& obj = root.as_object();
+        if (!obj.contains("cmake") || !obj.at("cmake").is_array()) {
+            continue;
+        }
+        for (const auto& t : obj.at("cmake").as_array()) {
+            if (!t.is_object()) {
+                continue;
+            }
+            const auto& to = t.as_object();
+            const auto nameIt = to.find("name");
+            if (nameIt == to.end() || !nameIt->value().is_string()) {
+                continue;
+            }
+            byName[std::string(nameIt->value().as_string())] = to;
+        }
+    }
+
+    json::array out;
+    for (const auto& [name, target] : byName) {
+        out.emplace_back(target);
+    }
+    return json::serialize(out);
 }
 
 std::string JsonClassLoader::getClassesJSON(const std::vector<std::string>& class_data) {

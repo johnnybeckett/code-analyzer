@@ -6,6 +6,8 @@
 #include <map>
 #include <memory>
 
+#include "core/cmake_model.h"
+
 // Forward declarations
 class Class;
 class Method;
@@ -103,6 +105,20 @@ public:
 class AnalysisResult {
 public:
     std::vector<std::unique_ptr<Class>> classes;
+
+    /**
+     * @brief CMake targets discovered in the analyzed directory (empty for
+     *        non-directory inputs, or a directory with no CMake files). The
+     *        "CMake" layout renders this as a library dependency graph.
+     */
+    CMakeGraph cmake;
+
+    /**
+     * @brief Renderable non-code files found in the analyzed directory
+     *        (Markdown, Graphviz .dot, Draw.io), for the file-viewer to
+     *        render instead of showing raw text.
+     */
+    std::vector<std::string> sources;
 
     void add_class(std::unique_ptr<Class> class_obj);
 };

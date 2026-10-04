@@ -1,8 +1,10 @@
 #include "core/analyzer.h"
+#include "core/cmake_analyzer.h"
 #include "core/config.h"
 #include "core/json_serializer.h"
 #include "core/parser_registry.h"
 #include "core/provider_registry.h"
+#include "core/renderable_sources.h"
 #include "core/report_visitor.h"
 #include "observers/analysis_observer.h"
 #include "observers/console_observer.h"
@@ -156,6 +158,17 @@ int main(int argc, char* argv[]) {
         }
 
         AnalysisResult result = analyzer.analyze(*provider);
+
+        // Directory mode only: also ingest the build graph from every
+        // CMakeLists.txt / *.cmake under the root (feeds the "CMake" layout),
+        // and the renderable non-code files (Markdown / Graphviz / Draw.io)
+        // the viewer can show rendered (feeds the "sources" array).
+        // No new flag — this rides on --directory / the positional root.
+        if (kind == "directory") {
+            const CMakeAnalyzer cmake_analyzer;
+            result.cmake = cmake_analyzer.parse_directory(input_path, config.skip_dirs);
+            result.sources = discover_renderable_sources(input_path, config.skip_dirs);
+        }
 
         // Optionally write the full analysis to a JSON file
         if (!json_output.empty()) {

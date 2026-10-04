@@ -81,5 +81,41 @@ boost::json::value serialize(const AnalysisResult& result, const std::string& in
         classes.emplace_back(std::move(cj));
     }
     root["classes"] = std::move(classes);
+
+    // Optional, backward-compatible keys: emitted only when present so a
+    // directory without CMake files (or without renderable non-code files)
+    // serializes exactly as before.
+    if (!result.cmake.empty()) {
+        json::array cmake;
+        for (const auto& target : result.cmake.targets) {
+            json::object tj;
+            tj["name"] = target.name;
+            tj["kind"] = target.kind;
+            if (!target.alias_of.empty()) {
+                tj["alias_of"] = target.alias_of;
+            }
+            json::array sources;
+            for (const auto& s : target.sources) {
+                sources.emplace_back(s);
+            }
+            tj["sources"] = std::move(sources);
+            json::array links;
+            for (const auto& l : target.links) {
+                links.emplace_back(l);
+            }
+            tj["links"] = std::move(links);
+            cmake.emplace_back(std::move(tj));
+        }
+        root["cmake"] = std::move(cmake);
+    }
+
+    if (!result.sources.empty()) {
+        json::array src;
+        for (const auto& s : result.sources) {
+            src.emplace_back(s);
+        }
+        root["sources"] = std::move(src);
+    }
+
     return json::value(std::move(root));
 }

@@ -1,8 +1,14 @@
 #include "core/analyzer.h"
 
-#include <filesystem>
+#include <algorithm>
+#include <cstddef>
+#include <exception>
 #include <iostream>
+#include <string>
+#include <thread>
+#include <vector>
 
+#include "core/analysis_reactor.h"
 #include "core/commit_provider.h"
 #include "core/compile_commands_provider.h"
 #include "core/directory_provider.h"
@@ -16,30 +22,53 @@ AnalysisResult Analyzer::analyze(const SourceFileProvider& provider) {
 
     std::cout << provider.banner() << std::endl;
 
-    for (const std::string& file_path : provider.files()) {
-        const std::string extension =
-            std::filesystem::path(file_path).extension().string();
+    // Materialize the file list once so the pool and the builder agree on the
+    // same order. Parsing is parallel (the reactor's workers); folding is not:
+    // this thread is the single builder, and it is the only place events are
+    // emitted, so EventDispatcher/observers stay single-threaded and see a
+    // deterministic, in-order stream.
+    const std::vector<std::string> files = provider.files();
+    const std::size_t n = files.size();
 
-        // A single unreadable or malformed file must not abort the run
-        try {
-            // Broadcast the progress event; registered observers (e.g. the
-            // console observer) decide what, if anything, to print.
-            emit(AnalysisEvent{AnalysisEvent::Kind::FileParsed, file_path, 0});
-
-            // Ask the registry for the parser that handles this extension; an
-            // unregistered extension simply yields no parser (and no classes).
-            if (auto parser = registry_.create(extension); parser) {
-                for (auto& parsed_class : parser->parse_file(file_path)) {
+    if (n > 0) {
+        // The builder: the single writer. It emits each file's progress event
+        // and folds its classes into the shared result; a failed file is
+        // reported (and skipped) exactly as the old serial loop did.
+        auto builder = [this, &result](ParseOutcome out) {
+            emit(AnalysisEvent{AnalysisEvent::Kind::FileParsed, out.file, 0});
+            if (out.ok) {
+                for (auto& parsed_class : out.classes) {
                     result.add_class(std::move(parsed_class));
                 }
+                return;
             }
-        } catch (const std::exception& e) {
-            std::cerr << "Warning: skipping file " << file_path
-                      << " (" << e.what() << ")" << std::endl;
-        } catch (...) {
-            std::cerr << "Warning: skipping file " << file_path
-                      << " (unknown error)" << std::endl;
+            // A single unreadable/malformed file must not abort the run.
+            try {
+                if (out.error) {
+                    std::rethrow_exception(out.error);
+                }
+                throw std::runtime_error("unknown parse error");
+            } catch (const std::exception& e) {
+                std::cerr << "Warning: skipping file " << out.file
+                          << " (" << e.what() << ")" << std::endl;
+            } catch (...) {
+                std::cerr << "Warning: skipping file " << out.file
+                          << " (unknown error)" << std::endl;
+            }
+        };
+
+        // Size the pool to the machine, capped so a huge tree doesn't oversub-
+        // scribe, and never larger than the work.
+        const std::size_t hw = std::thread::hardware_concurrency();
+        std::size_t workers = std::min<std::size_t>(n, (hw > 0 ? hw : 1));
+        workers = std::min<std::size_t>(workers, 32);
+        if (workers < 1) {
+            workers = 1;
         }
+
+        AnalysisReactor reactor(registry_, static_cast<unsigned>(workers),
+                                std::move(builder));
+        reactor.run(files);
     }
 
     AnalysisEvent complete;

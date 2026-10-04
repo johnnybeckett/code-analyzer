@@ -3,13 +3,20 @@
 #include <boost/beast.hpp>
 #include <boost/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <sys/types.h>
+#include <unistd.h>
 #include <vector>
 
 namespace json = boost::json;
@@ -238,6 +245,79 @@ std::string build_review_markdown(const std::vector<ReviewComment>& comments,
 }
 
 /**
+ * @brief True when `path` ends with `suffix` (case-insensitively, so
+ * `Graph.DOT` routes the same as `graph.dot`).
+ */
+bool ends_with_ci(const std::string& path, const char* suffix) {
+    const std::size_t n = std::strlen(suffix);
+    if (path.size() < n) {
+        return false;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        if (std::tolower(static_cast<unsigned char>(path[path.size() - n + i])) !=
+            std::tolower(static_cast<unsigned char>(suffix[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * @brief True if `bin` is resolvable on PATH (a clean 503 is better than an
+ * empty body when the renderer is simply not installed on this host).
+ */
+bool renderer_available(const std::string& bin) {
+    if (std::FILE* p = popen(("command -v " + bin + " >/dev/null 2>&1").c_str(), "r")) {
+        return pclose(p) == 0;
+    }
+    return false;
+}
+
+/**
+ * @brief Run a renderer over `source` and capture its stdout as the SVG.
+ *
+ * popen("r") hands us a read-only pipe, so the renderer reads the source from
+ * a file instead: mkstemps() creates an unguessable, O_EXCL temp file
+ * (mkstemps only appends alphanumerics, so quoting it later is safe), we
+ * write the source into it, exec `<cmd> '<tmp>'`, and delete it on every
+ * path. `cmd` is always one of the fixed literals chosen by serve_render —
+ * never built from the request. nullopt on write error, non-zero exit, or
+ * empty output; the caller stages a 502 for that.
+ */
+std::optional<std::string> run_renderer(const std::string& cmd, const std::string& source) {
+    char tmpl[] = "/tmp/uml-render-XXXXXX";
+    const int fd = mkstemps(tmpl, 0);
+    if (fd < 0) {
+        return std::nullopt;
+    }
+    const std::string tmp = tmpl;
+    if (source.size() != 0 &&
+        (write(fd, source.data(), source.size()) != static_cast<ssize_t>(source.size()) ||
+         fsync(fd) != 0)) {
+        ::close(fd);
+        std::remove(tmp.c_str());
+        return std::nullopt;
+    }
+    ::close(fd);
+
+    std::optional<std::string> svg;
+    if (std::FILE* p = popen((cmd + " '" + tmp + "'").c_str(), "r")) {
+        std::string out;
+        char buf[8192];
+        std::size_t got = 0;
+        while ((got = std::fread(buf, 1, sizeof buf, p)) > 0) {
+            out.append(buf, got);
+        }
+        const int st = pclose(p);
+        if (st == 0 && !out.empty()) {
+            svg = std::move(out);
+        }
+    }
+    std::remove(tmp.c_str());
+    return svg;
+}
+
+/**
  * @brief One HTTP connection: read a single request, answer it, close.
  *
  * Heap-owned and destroyed from its own terminal handler. Because everything runs
@@ -418,6 +498,57 @@ private:
         res_.body() = "source not found\n";
     }
 
+    // GET /render?path=… -> the allowlisted file rendered to SVG by an
+    // offline CLI tool (graphviz `dot` for .dot, `drawio` for .drawio/
+    // .draw.io). Same security posture as serve_source: the percent-decoded
+    // path is looked up in the preloaded allowlist, never turned into a
+    // filesystem path. A missing binary is a clean 503 JSON error so the
+    // viewer can fall back to source view.
+    void serve_render() {
+        const std::string target(req_.target());
+        const std::size_t q = target.find('?');
+        const std::string query = (q == std::string::npos) ? "" : target.substr(q + 1);
+        const std::string path = percent_decode(query_param(query, "path"));
+
+        if (sources_ && !path.empty()) {
+            const auto it = sources_->find(path);
+            if (it != sources_->end()) {
+                std::string bin, cmd;
+                if (ends_with_ci(path, ".dot")) {
+                    bin = "dot";
+                    cmd = "dot -Tsvg";
+                } else if (ends_with_ci(path, ".drawio") || ends_with_ci(path, ".draw.io")) {
+                    bin = "drawio";
+                    cmd = "drawio -x -f svg";
+                } else {
+                    json_error(http::status::bad_request,
+                              "unsupported format for rendering: " + path);
+                    return;
+                }
+
+                if (!renderer_available(bin)) {
+                    json_error(http::status::service_unavailable,
+                              "renderer '" + bin + "' not available on this host");
+                    return;
+                }
+
+                const std::optional<std::string> svg = run_renderer(cmd, it->second);
+                if (!svg) {
+                    json_error(http::status::bad_gateway,
+                              "renderer '" + bin + "' failed to produce output");
+                    return;
+                }
+
+                res_.result(http::status::ok);
+                res_.set(http::field::content_type, "image/svg+xml; charset=utf-8");
+                res_.body() = std::move(*svg);
+                return;
+            }
+        }
+
+        json_error(http::status::not_found, "no such source");
+    }
+
     void do_write() {
         // res_ is a member (not a local) because async_write is asynchronous:
         // it must outlive the do_write() frame or the in-flight serializer would
@@ -432,6 +563,8 @@ private:
         } else if (method == http::verb::get) {
             if (path == "/source") {
                 serve_source();
+            } else if (path == "/render") {
+                serve_render();
             } else if (path == "/comments") {
                 serve_comments();
             } else if (path == "/export/review") {

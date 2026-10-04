@@ -1,0 +1,14 @@
+// Graphviz fixture: the CMake target graph of this project.
+digraph cmake_fixture {
+    rankdir=LR;
+    "core" [shape=box, style=filled, fillcolor=lightblue];
+    "net" [shape=box, style=filled, fillcolor=lightgreen];
+    "iface" [shape=box, style=filled, fillcolor=lightsalmon];
+    "core-alias" [shape=box, style=dashed];
+    "app" [shape=box];
+    "net" -> "core";
+    "iface" -> "net";
+    "app" -> "net";
+    "app" -> "core-alias";
+    "app" -> "z";
+}

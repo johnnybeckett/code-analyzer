@@ -142,3 +142,64 @@ TEST(UmlModelTest, SourceFiles_MissingFile_FailSoftEmpty) {
     // (unlike build_html(), which must never serve an empty page).
     EXPECT_TRUE(model.source_files().empty());
 }
+
+TEST(UmlModelTest, CMakeTargets_SplicedIntoPage) {
+    // A JSON root carrying a "cmake" array must splice a non-empty CMAKE_TARGETS
+    // (the merged, name-sorted array) into the page — the CMake layout's input.
+    const std::string single = write_json(
+        "cmake_splice.json",
+        R"({"classes":[{"name":"Foo","namespace":"","methods":[],"attributes":[],"inheritance":[]}],"cmake":[
+            {"name":"net","kind":"library","sources":["net.cpp"],"links":["core"]},
+            {"name":"core","kind":"library","sources":["core.cpp"],"links":[]}
+        ]})");
+
+    uml::UmlModel model({single}, {});
+    const std::string page = model.build_html();
+    const std::string cmake = section(page, "CMAKE_TARGETS");
+
+    ASSERT_FALSE(cmake.empty());
+    EXPECT_NE(cmake.find("net"), std::string::npos);
+    EXPECT_NE(cmake.find("core"), std::string::npos);
+
+    // parseCmakeMerged sorts by name, so "core"'s object precedes "net"'s.
+    const std::size_t core_pos = cmake.find("core");
+    const std::size_t net_pos = cmake.find("net");
+    ASSERT_NE(core_pos, std::string::npos);
+    ASSERT_NE(net_pos, std::string::npos);
+    EXPECT_LT(core_pos, net_pos);
+}
+
+TEST(UmlModelTest, CMakeTargets_AbsentKey_SplicesEmptyArray) {
+    // No "cmake" key at all -> the page still gets a well-formed empty array
+    // (the layout must have a stable, parseable value to work from).
+    const std::string single = write_json(
+        "cmake_absent.json",
+        R"({"classes":[{"name":"Foo","namespace":"","methods":[],"attributes":[],"inheritance":[]}]})");
+
+    uml::UmlModel model({single}, {});
+    const std::string page = model.build_html();
+    EXPECT_EQ(section(page, "CMAKE_TARGETS"), "[]");
+}
+
+TEST(UmlModelTest, SourceFiles_IncludesRootSourcesArray) {
+    // Renderable non-code files are listed in a root-level "sources" array
+    // (Markdown / .dot / .drawio). source_files() must union those with the
+    // per-class "file" fields, deduped, class files first then the array.
+    const std::string single = write_json(
+        "cmake_sources.json",
+        R"({"classes":[
+            {"name":"A","file":"/src/a.cpp"},
+            {"name":"D","file":"/docs/README.md"}],
+           "sources":["/docs/README.md","/diagrams/graph.dot","/diagrams/diagram.drawio"]})");
+
+    uml::UmlModel model({single}, {});
+    const auto sources = model.source_files();
+
+    // class file fields first (a.cpp, README.md), then the sources-array
+    // entries not already seen (graph.dot, diagram.drawio).
+    ASSERT_EQ(sources.size(), 4u);
+    EXPECT_EQ(sources[0], "/src/a.cpp");
+    EXPECT_EQ(sources[1], "/docs/README.md");
+    EXPECT_EQ(sources[2], "/diagrams/graph.dot");
+    EXPECT_EQ(sources[3], "/diagrams/diagram.drawio");
+}

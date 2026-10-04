@@ -402,6 +402,55 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         #pane-code .dl-add { background: rgba(24, 128, 56, 0.18); }
         #pane-code .dl-gap { height: 1.55em; }
 
+        /* --- Renderable files: markdown HTML and server-rendered diagrams - */
+        /* The pane is monospace/pre for code; rendered markdown needs normal
+           block flow, so the wrappers switch it back. */
+        #pane-code .md-body,
+        #pane-code .dl-src.md-row { white-space: normal; }
+        #pane-code .md-body h1, #pane-code .md-body h2,
+        #pane-code .md-body h3, #pane-code .md-body h4 {
+            margin: 10px 0 4px; font-size: 1.1em; color: var(--syn-type);
+        }
+        #pane-code .md-body p { margin: 4px 0; }
+        #pane-code .md-body ul, #pane-code .md-body ol {
+            margin: 4px 0 4px 22px; padding: 0;
+        }
+        #pane-code .md-body blockquote {
+            margin: 6px 0; padding-left: 10px;
+            border-left: 3px solid var(--border); color: var(--muted);
+        }
+        #pane-code .md-body hr {
+            border: none; border-top: 1px solid var(--border); margin: 8px 0;
+        }
+        #pane-code .md-code,
+        #pane-code .dl-src.md-row .md-code {
+            background: rgba(127, 127, 127, 0.18);
+            border-radius: 3px; padding: 0 3px;
+        }
+        #pane-code .md-link { color: var(--syn-string); }
+        #pane-code .md-pre {
+            background: rgba(127, 127, 127, 0.10);
+            border: 1px solid var(--border); border-radius: 4px;
+            padding: 6px 8px; margin: 6px 0; overflow-x: auto;
+        }
+        /* A markdown diff row: one source line per row, so headings keep the
+           row's text size and each line's paragraph flows inline. */
+        #pane-code .dl-src.md-row h1, #pane-code .dl-src.md-row h2,
+        #pane-code .dl-src.md-row h3, #pane-code .dl-src.md-row h4,
+        #pane-code .dl-src.md-row h5, #pane-code .dl-src.md-row h6 {
+            font-size: 1em; font-weight: 600; margin: 0;
+        }
+        #pane-code .dl-src.md-row p { margin: 0; display: inline; }
+        #pane-code .diagram-wrap { padding: 10px; }
+        #pane-code .diagram-wrap svg {
+            max-width: 100%; max-height: 65vh; height: auto;
+        }
+        #pane-code .render-fallback {
+            padding: 4px 8px; margin-bottom: 6px;
+            font-size: 12px; font-style: italic; color: var(--muted);
+            border-bottom: 1px dashed var(--border);
+        }
+
         /* --- Diff mode: left file list, context menu, review comments ------ */
         #file-list {
             position: absolute;
@@ -612,6 +661,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             <option value="linear">Linear (hierarchy)</option>
             <option value="namespace">Grouped by namespace</option>
             <option value="circular">Circular</option>
+            <option value="cmake" style="display:none">CMake</option>
         </select>
         <div id="nsLevelWrap" style="display:none">
             <h3>Namespace level</h3>
@@ -671,6 +721,9 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         const DIFF_MODE = __DIFF_MODE__;
         const OLD_CLASSES = __OLD_CLASSES_JSON__;
         const NEW_CLASSES = __NEW_CLASSES_JSON__;
+        // CMake targets from the analyzed directory (empty when the input has
+        // none). Each: {name, kind, alias_of, sources[], links[]}.
+        const CMAKE_TARGETS = __CMAKE_JSON__;
 
         const esc = s => String(s).replace(/[&<>"]/g,
             ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[ch]));
@@ -1100,6 +1153,47 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             children.get(n.parent).push(n);
         }
 
+        // --- CMake targets -------------------------------------------------
+        // Each target from the analyzed directory becomes a node in the same
+        // nodes Map, flagged n.cmake so the class layouts, span and sidebar
+        // leave it out; only the 'cmake' layout shows it. A synthetic cls
+        // drives the box: the target name as the header (kind-prefixed) and
+        // its source files as member rows. Aliases render as dashed stubs.
+        // A real class of the same name wins (node already present).
+        const cmakeTargets = (CMAKE_TARGETS || [])
+            .filter(t => t && t.name);
+        const cmakeKnown = new Set(cmakeTargets.map(t => t.name));
+        for (const t of cmakeTargets) {
+            if (nodes.has(t.name)) continue;
+            const srcs = t.sources || [];
+            nodes.set(t.name, {
+                name: t.name,
+                cls: {
+                    name: t.name, namespace: '',
+                    kind: (t.kind && t.kind !== 'class') ? t.kind : 'library',
+                    file: null, methods: [],
+                    variables: srcs.map(s => ({ type: '', name: s })),
+                    __cmake: true,
+                },
+                external: t.kind === 'alias',
+                cmake: true, cmakeTarget: t,
+                parent: null, depth: 0, x: 0, y: 0, z: 0,
+                w: 0, h: 0, mesh: null, sideMat: null,
+            });
+        }
+
+        // CMake dependency edges from target_link_libraries: an arrow from a
+        // target to each linked target that is itself a known target (external
+        // libs like `z` and generator expressions have no node, so no edge).
+        const edgesCmake = [];
+        for (const t of cmakeTargets) {
+            for (const dep of (t.links || [])) {
+                if (dep && dep !== t.name && cmakeKnown.has(dep)) {
+                    edgesCmake.push({ from: t.name, to: dep });
+                }
+            }
+        }
+
         // Build every box (unresolved bases become small dashed stubs)
         for (const n of nodes.values()) {
             const cls = n.cls || { name: n.name, methods: [], variables: [] };
@@ -1114,6 +1208,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // Each layout assigns n.x/n.y/z to every node; applyLayout() then
         // moves the meshes and rebuilds the arrows, namespace frames and grid.
         let currentGroups = [];   // namespace frames (namespace layout only)
+        let currentMode = 'linear';   // active layout mode (set by applyLayout)
 
         // Tidy placement of one set of classes: leaves take consecutive x
         // slots, parents center over their children, levels stack vertically.
@@ -1165,7 +1260,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // Linear: one tidy layout over all classes; each independent
         // hierarchy keeps its own depth slice (the original arrangement).
         function layoutLinear() {
-            const roots = [...nodes.values()].filter(n => !n.parent);
+            const roots = [...nodes.values()].filter(n => !n.cmake && !n.parent);
             const hierarchies = [];
             for (const r of roots) {
                 const members = [r];
@@ -1187,9 +1282,10 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 members.forEach(n => { n.z += z; });
             });
             let cz = 0;
-            for (const n of nodes.values()) cz += n.z;
-            cz /= nodes.size;
-            nodes.forEach(n => { n.z -= cz; });
+            const laid = [...nodes.values()].filter(n => !n.cmake);
+            for (const n of laid) cz += n.z;
+            cz /= laid.length;
+            laid.forEach(n => { n.z -= cz; });
         }
 
         // Namespace: classes are grouped by namespace, falling back to the
@@ -1220,6 +1316,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         function layoutNamespaces() {
             const groups = new Map();
             for (const n of nodes.values()) {
+                if (n.cmake) continue;
                 const key = groupKey(n);
                 if (!groups.has(key)) groups.set(key, []);
                 groups.get(key).push(n);
@@ -1267,75 +1364,58 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             }));
         }
 
-        // Circular: namespace groups occupy angular sectors around the
-        // origin in the x-y plane (z = 0 for every node); within a sector,
-        // members sit on concentric rings by inheritance depth (roots
-        // innermost). One group or all-global data degrade to a single full
-        // 2*PI sector, so the same code path covers every case.
-        function layoutCircular() {
-            const groups = new Map();
-            for (const n of nodes.values()) {
-                const key = groupKey(n);
-                if (!groups.has(key)) groups.set(key, []);
-                groups.get(key).push(n);
-            }
-            const keys = [...groups.keys()].sort((a, b) =>
-                (a === '') - (b === '') || a.localeCompare(b));
-            const maxW = Math.max(10, ...nodes.values().map(n => n.w));
+        // Place `list` as one standing ring on the x-z plane (y = 0), each
+        // node's content face turned toward the center (n.rotY, applied by
+        // applyLayout). Radius is large enough that the chord between
+        // adjacent boxes is >= maxW + 2*GAP; a lone node has no neighbours.
+        function placeRing(list) {
+            const N = list.length;
             const GAP = 3;
-            const RING_GAP = maxW + GAP * 2;
-            const R0 = maxW + GAP * 2;
+            const maxW = N ? Math.max(...list.map(n => n.w)) : 0;
+            let R = maxW + GAP * 2;
+            if (N > 1) R = Math.max(R, (maxW / 2 + GAP) / Math.sin(Math.PI / N));
             const TWO_PI = Math.PI * 2;
-            const sector = TWO_PI / Math.max(1, keys.length);
-            keys.forEach((key, gi) => {
-                const members = groups.get(key);
-                const inner = new Set(members.map(n => n.name));
-                // Inheritance depth within this sector (roots = 0)
-                const depthOf = n => {
-                    let d = 0, cur = n, guard = 0;
-                    while (cur.parent && inner.has(cur.parent) && guard++ < 1000) {
-                        d++; cur = nodes.get(cur.parent);
-                    }
-                    return d;
-                };
-                const byDepth = new Map();
-                for (const n of members) {
-                    const d = depthOf(n);
-                    if (!byDepth.has(d)) byDepth.set(d, []);
-                    byDepth.get(d).push(n);
-                }
-                const start = -Math.PI / 2 + gi * sector;
-                // Innermost first, so rings sharing angles (same member
-                // count place their boxes at identical odd-multiple slots)
-                // can be pushed strictly apart ring by ring.
-                const depths = [...byDepth.keys()].sort((a, b) => a - b);
-                const ringRadius = new Map();   // ring length -> largest radius used
-                for (const d of depths) {
-                    const ring = byDepth.get(d);
-                    const slot = sector / ring.length;
-                    // Radius large enough that the chord between adjacent
-                    // boxes is >= maxW + 2*GAP; clamp sin so a tiny slot
-                    // can't blow up the radius. A singleton ring has no
-                    // in-ring neighbours, so it only needs clearance from
-                    // the adjacent sector — and a lone group (full 2*PI
-                    // sector) has no neighbours at all, so no lower bound.
-                    let need = 0;
-                    if (ring.length > 1) {
-                        need = (maxW / 2 + GAP) / Math.max(0.2, Math.sin(slot / 2));
-                    } else if (keys.length > 1) {
-                        need = (maxW / 2 + GAP) / Math.max(0.2, Math.sin(sector / 2));
-                    }
-                    let r = Math.max(R0 + d * RING_GAP, need);
-                    const prev = ringRadius.get(ring.length);
-                    if (prev !== undefined) r = Math.max(r, prev + RING_GAP);
-                    ringRadius.set(ring.length, r);
-                    ring.forEach((n, i) => {
-                        const a = start + (i + 0.5) * slot;
-                        n.x = r * Math.cos(a);
-                        n.y = r * Math.sin(a);
-                        n.z = 0;
-                    });
-                }
+            list.forEach((n, i) => {
+                const a = (i + 0.5) * TWO_PI / N;
+                n.x = R * Math.cos(a);
+                n.z = R * Math.sin(a);
+                n.y = 0;
+                n.rotY = a - Math.PI / 2;   // +z content face points at the origin
+            });
+        }
+
+        // Circular ("Stonehenge"): one giant ring of every class, neighbours
+        // side by side, content faces toward the center, seen from an
+        // elevated camera (homeView lifts the pitch in this mode).
+        function layoutCircular() {
+            const list = [...nodes.values()]
+                .filter(n => !n.cmake)
+                .sort((a, b) =>
+                    groupKey(a).localeCompare(groupKey(b)) || a.name.localeCompare(b.name));
+            placeRing(list);
+        }
+
+        // CMake: the analyzed project's targets stand in one flat ring on the
+        // x-y plane (z = 0, front-facing at the default camera pitch); name
+        // order keeps the graph readable, aliases render as dashed stubs and
+        // target_link_libraries arrows cross the center.
+        function layoutCmake() {
+            const list = [...nodes.values()]
+                .filter(n => n.cmake)
+                .sort((a, b) => a.name.localeCompare(b.name));
+            const N = list.length;
+            if (!N) return;
+            const GAP = 3;
+            const maxW = Math.max(...list.map(n => n.w));
+            let R = maxW + GAP * 2;
+            if (N > 1) R = Math.max(R, (maxW / 2 + GAP) / Math.sin(Math.PI / N));
+            const TWO_PI = Math.PI * 2;
+            list.forEach((n, i) => {
+                const a = (i + 0.5) * TWO_PI / N;
+                n.x = R * Math.cos(a);
+                n.y = R * Math.sin(a);
+                n.z = 0;
+                n.rotY = 0;
             });
         }
 
@@ -1360,13 +1440,16 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             return new THREE.Line(geo, edgeMat);
         }
 
+        // The CMake layout draws the target graph instead of inheritance;
+        // every other layout draws the inheritance edges.
+        const activeEdges = () => (currentMode === 'cmake') ? edgesCmake : edges;
         let edgeObjs = [];
         function rebuildEdges() {
             for (const e of edgeObjs) {
                 diagram.remove(e.line);
                 e.line.geometry.dispose();   // edgeMat is shared — keep it
             }
-            edgeObjs = edges
+            edgeObjs = activeEdges()
                 .map(e => ({ from: e.from, to: e.to, line: makeEdge(nodes.get(e.from), nodes.get(e.to)) }))
                 .filter(e => e.line);
             edgeObjs.forEach(e => diagram.add(e.line));
@@ -1378,8 +1461,10 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // Faint floor grid as a depth cue (rebuilt when the layout or theme changes)
         let span = 100, gridY = 0;
         function computeSpan() {
-            span = Math.max(...nodes.values().map(n => Math.hypot(n.x, n.y, n.z) + Math.max(n.w, n.h)));
-            gridY = Math.min(...nodes.values().map(n => n.y - n.h / 2)) - 3;
+            const list = [...nodes.values()].filter(n => n.cmake === (currentMode === 'cmake'));
+            if (!list.length) { span = 100; gridY = 0; return; }
+            span = Math.max(...list.map(n => Math.hypot(n.x, n.y, n.z) + Math.max(n.w, n.h)));
+            gridY = Math.min(...list.map(n => n.y - n.h / 2)) - 3;
         }
         let grid = null;
         function syncGrid() {
@@ -1482,10 +1567,17 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // Switch layout: re-place every node, then rebuild the arrows, the
         // namespace frames and the grid to match
         function applyLayout(mode) {
+            currentMode = mode;
             if (mode === 'namespace') layoutNamespaces();
             else if (mode === 'circular') { currentGroups = []; layoutCircular(); }
+            else if (mode === 'cmake') { currentGroups = []; layoutCmake(); }
             else { currentGroups = []; layoutLinear(); }
-            for (const n of nodes.values()) n.mesh.position.set(n.x, n.y, n.z);
+            for (const n of nodes.values()) {
+                n.mesh.position.set(n.x, n.y, n.z);
+                // Only the Stonehenge ring stands on edge, faces turned to
+                // the center; every other layout is flat and front-facing
+                n.mesh.rotation.y = (mode === 'circular' && !n.cmake) ? (n.rotY || 0) : 0;
+            }
             rebuildEdges();
             refreshPanels();
             computeSpan();
@@ -1531,9 +1623,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         let autoRotate = true;
         let dragging = false, lastX = 0, lastY = 0;
         // The "home" view: centred, head-on, initial zoom — the destination
-        // of both the initial setup and "Reset View"
+        // of both the initial setup and "Reset View". The Stonehenge ring
+        // stands in the x-z plane, so its home view is elevated (+0.9 rad)
+        // to look down on it.
         function homeView() {
-            return { yaw: 0, pitch: 0, dist: initDist, tx: 0, ty: 0, tz: 0 };
+            return { yaw: 0, pitch: currentMode === 'circular' ? 0.9 : 0,
+                     dist: initDist, tx: 0, ty: 0, tz: 0 };
         }
         const focus = { active: false, ...homeView() };
 
@@ -1906,6 +2001,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }
 
         function updateStats() {
+            if (currentMode === 'cmake') {
+                const t = (CMAKE_TARGETS || []).filter(x => x && x.name).length;
+                document.getElementById('stats').textContent
+                    = t + ' CMake target' + (t === 1 ? '' : 's') + ' shown';
+                return;
+            }
             const cards = [...document.querySelectorAll('.classCard')];
             const shown = cards.filter(c => {
                 if (c.style.display === 'none') return false;
@@ -1920,28 +2021,36 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // --- (classes are hidden in both the 3D scene and the panel), then
         // --- narrow the drawn set to the nearest lodLimit via applyLod()
         function applyVisibility() {
+            // CMake targets live in a separate world: in the cmake layout
+            // they are the diagram (and the class boxes + class sidebar are
+            // not), and in every other layout they are absent.
+            const inCmakeMode = currentMode === 'cmake';
             const realVisible = new Map();
             nodes.forEach(n => {
+                if (n.cmake !== inCmakeMode) return;
                 if (!n.external) realVisible.set(n.name, classVisible(n.name));
             });
             lodPool = [];
             nodes.forEach(n => {
+                if (n.cmake !== inCmakeMode) return;
                 let visible;
                 if (!n.external) {
                     visible = realVisible.get(n.name);
                 } else {
-                    // Unresolved base: keep it while any of its children is shown
+                    // Unresolved base (or alias stub): shown while any of its
+                    // dependents/children is shown
                     visible = edgeObjs.some(e => e.to === n.name && realVisible.get(e.from));
                 }
                 if (visible) lodPool.push(n);
             });
             applyLod();
+            const hideCards = inCmakeMode;
             document.querySelectorAll('.classCard').forEach(card => {
-                card.style.display = classVisible(card.dataset.name) ? '' : 'none';
+                card.style.display = (hideCards || !classVisible(card.dataset.name)) ? 'none' : '';
             });
             // Hide a namespace group whose classes are all hidden
             document.querySelectorAll('.nsGroup').forEach(g => {
-                const anyShown = [...g.querySelectorAll('.classCard')]
+                const anyShown = !hideCards && [...g.querySelectorAll('.classCard')]
                     .some(card => card.style.display !== 'none');
                 g.style.display = anyShown ? '' : 'none';
             });
@@ -2083,6 +2192,11 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             nsLevelWrap.style.display = (layoutSelect.value === 'namespace') ? '' : 'none';
             applyLayout(layoutSelect.value);
         });
+        // The CMake layout only exists when the analyzed directory produced
+        // targets; reveal it then.
+        if ((CMAKE_TARGETS || []).some(t => t && t.name)) {
+            document.querySelector('#layoutSelect option[value="cmake"]').style.display = '';
+        }
         applyLayout(layoutSelect.value);
 
         // Diff mode: reveal the toggle and legend, report the counts, and wire
@@ -2284,9 +2398,141 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             return out;
         }
 
+        // --- Renderable non-code files ------------------------------------
+        // Extension tests drive openTab / renderLine: markdown renders to
+        // HTML, diagrams render server-side via /render (dot / drawio).
+        function isMd(path) {
+            const p = String(path || '');
+            return p.endsWith('.md') || p.endsWith('.markdown');
+        }
+        function isDiagram(path) {
+            const p = String(path || '').toLowerCase();
+            return p.endsWith('.dot') || p.endsWith('.drawio') || p.endsWith('.draw.io');
+        }
+        // Per-path preference from the context menu: 'auto' (the extension
+        // decides) is the default; 'source' / 'rendered' force a side.
+        const renderModes = new Map();
+        const renderMode = p => renderModes.get(p) || 'auto';
+
+        // --- Inline markdown: escape-first, so it is XSS-safe -------------
+        // `code`, **bold**, *em*, [text](url). The URL scheme allowlist keeps
+        // javascript: links dead; esc() already neutralized any quotes.
+        function mdInline(text) {
+            let s = esc(text);
+            s = s.replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
+            s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            s = s.replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+            s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) =>
+                /^(https?:|\/|\.)/i.test(url)
+                    ? '<a class="md-link" href="' + url + '" target="_blank" rel="noopener">'
+                      + label + '</a>'
+                    : label);
+            return s;
+        }
+
+        // Block-level markdown -> HTML. Compact on purpose: headings, fenced
+        // code, lists, blockquotes, hr, paragraphs; inline markup via
+        // mdInline. Every raw line passes through esc(), so the output is
+        // safe to innerHTML.
+        function mdToHtml(md) {
+            if (typeof md !== 'string') md = String(md);
+            if (!md.trim()) return '';
+            if (md.length > 300000) return '<pre class="md-pre">' + esc(md) + '</pre>';
+            const lines = md.split(/\r?\n/);
+            const out = [];
+            const para = [];
+            const flush = () => {
+                if (para.length) { out.push('<p>' + mdInline(para.join(' ')) + '</p>'); para.length = 0; }
+            };
+            let i = 0;
+            while (i < lines.length) {
+                const line = lines[i];
+                let m;
+                if (/^\s*$/.test(line)) { flush(); i++; continue; }
+                if ((m = line.match(/^(#{1,6})\s+(.*)$/))) {
+                    flush();
+                    const lvl = m[1].length;
+                    out.push('<h' + lvl + '>' + mdInline(m[2]) + '</h' + lvl + '>');
+                    i++; continue;
+                }
+                if (/^\s*(```|~~~)/.test(line)) {
+                    flush();
+                    const buf = [];
+                    i++;
+                    while (i < lines.length && !/^\s*(```|~~~)/.test(lines[i])) { buf.push(lines[i]); i++; }
+                    i++;   // skip the closing fence (or run to EOF)
+                    out.push('<pre class="md-pre"><code>' + esc(buf.join('\n')) + '</code></pre>');
+                    continue;
+                }
+                if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flush(); out.push('<hr/>'); i++; continue; }
+                if (/^\s*>/.test(line)) {
+                    flush();
+                    const buf = [];
+                    while (i < lines.length && /^\s*>/.test(lines[i])) {
+                        buf.push(lines[i].replace(/^\s*>\s?/, '')); i++;
+                    }
+                    out.push('<blockquote>' + mdToHtml(buf.join('\n')) + '</blockquote>');
+                    continue;
+                }
+                if (/^\s*[-*+]\s+/.test(line)) {
+                    flush();
+                    const buf = [];
+                    while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+                        buf.push(lines[i].replace(/^\s*[-*+]\s+/, '')); i++;
+                    }
+                    out.push('<ul>' + buf.map(li => '<li>' + mdInline(li) + '</li>').join('') + '</ul>');
+                    continue;
+                }
+                if (/^\s*\d+[.)]\s+/.test(line)) {
+                    flush();
+                    const buf = [];
+                    while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+                        buf.push(lines[i].replace(/^\s*\d+[.)]\s+/, '')); i++;
+                    }
+                    out.push('<ol>' + buf.map(li => '<li>' + mdInline(li) + '</li>').join('') + '</ol>');
+                    continue;
+                }
+                para.push(line);
+                i++;
+            }
+            flush();
+            return out.join('\n');
+        }
+
         // --- Fetch + render a tab -----------------------------------------
         function setPlaceholder(msg) {
             paneEl.code.innerHTML = '<span class="syn-placeholder">' + esc(msg) + '</span>';
+        }
+        // Render one fetched file by preference: markdown -> HTML, diagrams
+        // -> the server-rendered SVG (source fallback if the renderer is
+        // missing), everything else the syntax highlighter.
+        function renderTab(path, text) {
+            if (isMd(path) && renderMode(path) !== 'source') {
+                paneEl.code.innerHTML = '<div class="md-body">' + mdToHtml(text) + '</div>';
+                return;
+            }
+            if (isDiagram(path) && renderMode(path) !== 'source') {
+                renderDiagram(path, text);
+                return;
+            }
+            paneEl.code.innerHTML = highlight(text);
+        }
+        // Diagrams render on the server (offline shell-out to dot / drawio).
+        // Any failure — binary missing (503), bad body, empty SVG — falls
+        // back to the highlighted source under an explanatory banner.
+        function renderDiagram(path, text) {
+            fetch('/render?path=' + encodeURIComponent(path))
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                .then(svg => {
+                    if (activePath !== path) return;   // superseded by a newer tab
+                    paneEl.code.innerHTML = '<div class="diagram-wrap">' + svg + '</div>';
+                })
+                .catch(() => {
+                    if (activePath !== path) return;
+                    paneEl.code.innerHTML =
+                        '<div class="render-fallback">renderer unavailable — showing source</div>'
+                        + highlight(text);
+                });
         }
         function openTab(path) {
             activePath = path;
@@ -2297,7 +2543,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
                 .then(text => {
                     if (activePath !== path) return;   // superseded by a newer tab
-                    paneEl.code.innerHTML = highlight(text);
+                    renderTab(path, text);
                 })
                 .catch(() => {
                     if (activePath !== path) return;
@@ -2407,10 +2653,17 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // delegated #pane-code handler covers these rows too). data-o/data-n are
         // the counts of old/new lines ABOVE this row; together they uniquely
         // identify the row, so resync anchors and comment markers can find it.
-        function renderLine(line, status, ln, dataO, dataN) {
+        function renderLine(line, status, ln, dataO, dataN, path) {
+            // Markdown rows render through the same mdToHtml so bold/code/
+            // lists keep meaning in the diff; the .dl envelope (and its
+            // data-o/data-n stamps) is untouched, so resync, scroll anchors
+            // and comment markers still find the row.
+            const src = isMd(path) && renderMode(path) !== 'source'
+                ? '<span class="dl-src md-row">' + (mdToHtml(line) || '&nbsp;') + '</span>'
+                : '<span class="dl-src">' + highlight(line) + '</span>';
             return '<div class="dl ' + status + '" data-o="' + dataO
                 + '" data-n="' + dataN + '"><span class="dl-ln">' + ln
-                + '</span><span class="dl-src">' + highlight(line) + '</span></div>';
+                + '</span>' + src + '</div>';
         }
 
         // Build the two-column view from the alignment ops. `lines` may be
@@ -2444,12 +2697,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                         if (oi === null) body +=
                             '<div class="dl dl-gap" data-o="' + o + '" data-n="' + n + '"></div>';
                         else body += renderLine(lines[oi],
-                            ni === null ? 'dl-del' : 'dl-same', oi + 1, o, n);
+                            ni === null ? 'dl-del' : 'dl-same', oi + 1, o, n, path);
                     } else {
                         if (ni === null) body +=
                             '<div class="dl dl-gap" data-o="' + o + '" data-n="' + n + '"></div>';
                         else body += renderLine(lines[ni],
-                            oi === null ? 'dl-add' : 'dl-same', ni + 1, o, n);
+                            oi === null ? 'dl-add' : 'dl-same', ni + 1, o, n, path);
                     }
                 }
                 return '<div class="diff-col"><div class="diff-col-head">' + head + '</div>'
@@ -2468,9 +2721,61 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         // review-comment badges over the fresh rows. Called after any state
         // change: a fetch landing, a resync, or the ignore-whitespace toggle.
         function renderDiffNow() {
+            if (isDiagram(curOldPath) || isDiagram(curNewPath)) {
+                renderDiagramDiff();   // side-by-side renders; no line diff
+                renderCommentMarkers();
+                return;
+            }
             paneEl.code.innerHTML = diffColumns(
                 curOldLines, curNewLines, curOldPath, curNewPath, curAnchors);
             renderCommentMarkers();
+        }
+
+        // Diagram revisions can't be diffed line-for-line: show both sides'
+        // rendered SVG (or their source when the renderer is absent) in the
+        // usual two-column shell.
+        function diagramDiffCol(path, side) {
+            const head = path ? esc(path) : esc(side === 'old'
+                ? 'added — no file in old revision'
+                : 'removed — no file in new revision');
+            return '<div class="diff-col"><div class="diff-col-head">' + head + '</div>'
+                + '<div class="diagram-fill"></div></div>';
+        }
+        function renderDiagramDiff() {
+            const linesOf = side =>
+                (side === 'old' ? curOldLines : curNewLines) || null;
+            const textOf = side => {
+                const l = linesOf(side);
+                return l ? l.join('\n') : null;
+            };
+            paneEl.code.innerHTML = '<div class="diff-split">'
+                + diagramDiffCol(curOldPath, 'old')
+                + diagramDiffCol(curNewPath, 'new') + '</div>';
+            const cols = paneEl.code.querySelectorAll('.diagram-fill');
+            const fill = (idx, path) => {
+                const el = cols[idx];
+                const text = textOf(idx === 0 ? 'old' : 'new');
+                if (!el) return;
+                if (!path) {
+                    el.innerHTML = '<span class="diff-col-none">no file in this revision</span>';
+                    return;
+                }
+                if (renderMode(path) === 'source' || text === null) {
+                    el.innerHTML = text !== null
+                        ? highlight(text)
+                        : '<span class="syn-placeholder">source not available</span>';
+                    return;
+                }
+                fetch('/render?path=' + encodeURIComponent(path))
+                    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+                    .then(svg => { el.innerHTML = '<div class="diagram-wrap">' + svg + '</div>'; })
+                    .catch(() => {
+                        el.innerHTML = '<div class="render-fallback">renderer unavailable — showing source</div>'
+                            + (text !== null ? highlight(text) : '');
+                    });
+            };
+            fill(0, curOldPath);
+            fill(1, curNewPath);
         }
 
         // Fetch both revisions of `oldPath`/`newPath` (where they exist) and
@@ -2617,10 +2922,18 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
 
             // Diff mode: OLD | NEW side-by-side source instead of the tabbed
             // single-file view (showDiff hides the tabs and fetches both).
-            if (DIFF_MODE) { showDiff(n); return; }
+            // A CMake target is not part of the old/new class merge, so it has
+            // no revision pair to diff.
+            if (DIFF_MODE) {
+                if (n.cmake) { setPlaceholder('CMake target — no revision pair to diff'); return; }
+                showDiff(n); return;
+            }
 
-            // Tabs for this class's source files, own file first; open it.
-            curFiles = relatedFiles(n);
+            // Tabs: a CMake target's "source" is the files its build rules
+            // attached to it; a class's are the related files, own first.
+            curFiles = n.cmake
+                ? ((n.cmakeTarget && n.cmakeTarget.sources) || [])
+                : relatedFiles(n);
             activePath = null;
             paneEl.tabs.innerHTML = '';
             for (const path of curFiles) {
@@ -2633,7 +2946,9 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 paneEl.tabs.appendChild(tab);
             }
             if (curFiles.length) openTab(curFiles[0]);
-            else setPlaceholder('no source file recorded for this class');
+            else setPlaceholder(n.cmake
+                ? 'no source files recorded for this target'
+                : 'no source file recorded for this class');
         }
 
         // One delegated click handler on the stable #pane-code element: any
@@ -2838,6 +3153,16 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             return d;
         };
 
+        // View source / View rendered: flips the active file's preference in
+        // renderModes and re-renders the tab through the usual openTab path.
+        function toggleRender() {
+            const p = activePath;
+            if (!p) return;
+            const rendering = (isMd(p) || isDiagram(p)) && renderMode(p) !== 'source';
+            renderModes.set(p, rendering ? 'source' : 'auto');
+            openTab(p);
+        }
+
         // Build and show the menu at (x, y), clamped to the viewport. `rowEl` is
         // the diff row (or null when right-clicking a gap / non-row), which
         // enables the row-specific items.
@@ -2848,6 +3173,16 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             const hasRow = !!rowEl;
             const many = fileEntries.length >= 2;
             menu.innerHTML = '';
+            // Render/source toggle: enabled when the flip would actually do
+            // something (the file is renderable); a plain-code file only shows
+            // the disabled hint.
+            const p = activePath;
+            const renderable = !!p && (isMd(p) || isDiagram(p));
+            const rendering = renderable && renderMode(p) !== 'source';
+            menu.appendChild(ctxItem(
+                rendering ? 'View source' : 'View rendered',
+                rendering || renderable, toggleRender));
+            menu.appendChild(ctxSep());
             menu.appendChild(ctxItem('Resync here', hasRow, () => resyncHere(ctxTargetRow)));
             menu.appendChild(ctxItem('Clear resync', curAnchors.length > 0, () => clearResync()));
             menu.appendChild(ctxSep());
@@ -2903,12 +3238,14 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             showFileDiff(e.oldPath, e.newPath);
         }
 
-        // Right-click a diff row for the review context menu (diff mode only).
-        // Delegated on the stable #pane-code element, like the click handler, so
-        // it survives every innerHTML re-render.
+        // Right-click the source pane for the context menu. Diff mode adds the
+        // review items (row-specific when a row was clicked); single-file mode
+        // shows the same menu with the review items disabled — the
+        // render/source toggle is what matters there. Delegated on the stable
+        // #pane-code element, like the click handler, so it survives every
+        // innerHTML re-render.
         paneEl.code.addEventListener('contextmenu', e => {
-            if (!DIFF_MODE) return;
-            if (!paneEl.code.querySelector('.diff-split')) return;   // no diff on screen
+            if (DIFF_MODE && !paneEl.code.querySelector('.diff-split')) return;
             e.preventDefault();
             const row = (e.target && e.target.closest) ? e.target.closest('.dl') : null;
             openCtxMenu(e.clientX, e.clientY,

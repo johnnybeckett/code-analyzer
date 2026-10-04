@@ -12,6 +12,9 @@ add_executable(code_analyzer_tests
     gtest/uml_test.cpp
     gtest/uml_model_test.cpp
     gtest/uml_server_test.cpp
+    gtest/render_route_test.cpp
+    gtest/cmake_analyzer_test.cpp
+    gtest/thread_pool_test.cpp
     gtest/csharp_test.cpp
     gtest/cpp_kind_test.cpp
 )
