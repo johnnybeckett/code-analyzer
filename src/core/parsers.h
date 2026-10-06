@@ -25,34 +25,26 @@ public:
 /**
  * @brief Adapt the C# parser to IParser.
  *
- * CSharpParser::parse_file returns 0-or-1 classes; the adapter lifts that
- * into a vector so callers see the unified IParser shape.
+ * CSharpParser::parse_file already returns a vector (a file may declare
+ * several types), so the adapter forwards the result unchanged.
  */
 class CSharpFileAdapter : public IParser {
 public:
     std::vector<std::unique_ptr<Class>> parse_file(const std::string& file_path) override {
-        auto parsed = CSharpParser::parse_file(file_path);
-        if (!parsed) return {};
-        std::vector<std::unique_ptr<Class>> result;
-        result.emplace_back(std::move(parsed));
-        return result;
+        return CSharpParser::parse_file(file_path);
     }
 };
 
 /**
  * @brief Adapt the Python parser to IParser.
  *
- * PythonParser::parse_file returns 0-or-1 classes; the adapter lifts that
- * into a vector so callers see the unified IParser shape.
+ * PythonParser::parse_file already returns a vector (a module may declare
+ * several classes), so the adapter forwards the result unchanged.
  */
 class PythonFileAdapter : public IParser {
 public:
     std::vector<std::unique_ptr<Class>> parse_file(const std::string& file_path) override {
-        auto parsed = PythonParser::parse_file(file_path);
-        if (!parsed) return {};
-        std::vector<std::unique_ptr<Class>> result;
-        result.emplace_back(std::move(parsed));
-        return result;
+        return PythonParser::parse_file(file_path);
     }
 };
 

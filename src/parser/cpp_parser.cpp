@@ -1,4 +1,5 @@
 #include "parser/cpp_parser.h"
+#include "parser/call_scanner.h"
 #include "core/model.h"
 #include <iostream>
 #include <fstream>
@@ -7,6 +8,7 @@
 #include <cctype>
 #include <filesystem>
 #include <set>
+#include <unordered_set>
 #include <iterator>
 
 namespace {
@@ -27,6 +29,22 @@ const std::set<std::string>& syntax_keywords() {
         "true", "false", "and", "or", "not"
     };
     return keywords;
+}
+
+/**
+ * @brief C++ keywords that can appear as `<keyword>(` but are not calls
+ *
+ * Feeding these to the shared CallScanner strips the control-flow, cast and
+ * resource-allocation forms so only genuine callee names remain.
+ */
+const std::unordered_set<std::string>& cpp_call_blacklist() {
+    static const std::unordered_set<std::string> blacklist = {
+        "if", "for", "while", "switch", "catch", "sizeof", "return",
+        "new", "delete", "throw", "static_cast", "dynamic_cast",
+        "const_cast", "reinterpret_cast", "noexcept", "else", "case",
+        "co_await", "co_yield", "co_return"
+    };
+    return blacklist;
 }
 
 /**
@@ -244,7 +262,11 @@ void extract_members(Class& cls, const std::string& body) {
 
     std::istringstream stream(body);
     std::string line;
+    size_t line_offset = 0;  // char offset of the current line within `body`
     while (std::getline(stream, line)) {
+        const size_t line_start = line_offset;
+        line_offset += line.size() + 1;  // advance past the line and its newline
+
         const int line_brace_depth = brace_depth;
         const int line_paren_depth = paren_depth;
 
@@ -312,6 +334,22 @@ void extract_members(Class& cls, const std::string& body) {
                     method->return_type = type;
                     method->is_static = line.find("static") != std::string::npos;
                     method->parameters = split_parameters(line.substr(open + 1, close - open - 1));
+
+                    // An inline definition ends this line with `{`; brace-match
+                    // that body and record the callee set for the call graph.
+                    if (ends_with_open_brace) {
+                        const size_t brace_pos = body.find('{', line_start);
+                        if (brace_pos != std::string::npos) {
+                            const size_t end_pos = find_matching_brace(body, brace_pos);
+                            if (end_pos != std::string::npos) {
+                                const std::string method_body =
+                                    body.substr(brace_pos + 1, end_pos - brace_pos - 1);
+                                method->called_methods = CallScanner::extract(
+                                    method_body, cpp_call_blacklist());
+                            }
+                        }
+                    }
+
                     cls.add_method(std::move(method));
                 }
                 continue;

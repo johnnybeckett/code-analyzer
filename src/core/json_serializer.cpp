@@ -63,6 +63,15 @@ boost::json::value serialize(const AnalysisResult& result, const std::string& in
                 params.emplace_back(param);
             }
             mj["parameters"] = std::move(params);
+
+            // Callee names referenced in the method body (call-graph edges);
+            // empty when the parser could not capture a body.
+            json::array calls;
+            for (const auto& callee : method->called_methods) {
+                calls.emplace_back(callee);
+            }
+            mj["called_methods"] = std::move(calls);
+
             methods.emplace_back(std::move(mj));
         }
         cj["methods"] = std::move(methods);

@@ -35,6 +35,7 @@ add_library(code_analyzer_core STATIC
     src/parser/cpp_parser.cpp
     src/parser/csharp_parser.cpp
     src/parser/python_parser.cpp
+    src/parser/call_scanner.cpp
     src/observers/analysis_observer.cpp
     src/observers/console_observer.cpp
 )
@@ -63,7 +64,9 @@ add_executable(UmlServer
     src/server/review_store.cpp
     src/server/http_util.cpp
     src/server/rest_handlers.cpp
+    src/server/source_resolver.cpp
     src/server/openapi.cpp
+    src/server/class_index.cpp
 )
 
 # Add documentation generator executable

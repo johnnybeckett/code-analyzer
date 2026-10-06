@@ -4,6 +4,7 @@
 #include "core/model.h"
 #include <string>
 #include <memory>
+#include <vector>
 
 /**
  * @brief C# parser implementation
@@ -13,9 +14,9 @@ public:
     /**
      * @brief Parse a C# file
      * @param file_path Path to the C# file
-     * @return Parsed Class object or nullptr if error
+     * @return All classes found in the file (empty on error or no types)
      */
-    static std::unique_ptr<Class> parse_file(const std::string& file_path);
+    static std::vector<std::unique_ptr<Class>> parse_file(const std::string& file_path);
 
     /**
      * @brief Parse C# project files

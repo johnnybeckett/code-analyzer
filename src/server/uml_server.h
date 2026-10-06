@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "server/class_index.h"
 #include "server/rest_handler.h"
 #include "server/review_store.h"
 
@@ -18,6 +19,10 @@ namespace server {
  *
  * Serves the fully-built UML viewer HTML (received as an opaque body string)
  * on any unmatched GET, plus a small set of routes:
+ *   - `GET  /classes/index` — the spatial overview (count, bounds, cell size,
+ *     sample) of the class index it was handed.
+ *   - `GET  /classes/near?x=&y=&z=&count=N` — the N classes closest to a
+ *     coordinate; the streaming viewer's window query.
  *   - `GET  /source?path=...` — the raw source of a class, looked up exactly
  *     (percent-decoded) against the allowlist of source files it was handed.
  *   - `GET  /comments` — the review comments as JSON (empty list if the store
@@ -55,6 +60,11 @@ public:
      *        renders an empty document — the right shape for single-input mode.
      * @param title A human title (e.g. "old.json -> new.json") shown in the
      *        Markdown export header. Empty in single-input mode.
+     * @param classIndex The spatial index backing `GET /classes/index` and
+     *        `GET /classes/near` (shared: the server never mutates it).
+     *        `nullptr` (the default) keeps the server shape-compatible with
+     *        callers that have no classes — both routes then answer a clean
+     *        501 and the rest of the API is unaffected.
      *
      * The listener is opened/bound/listened immediately so local_port() is valid
      * before run().
@@ -66,7 +76,8 @@ public:
               std::map<std::string, std::string> sources,
               std::uint16_t port,
               std::shared_ptr<ReviewStore> review = nullptr,
-              std::string title = {});
+              std::string title = {},
+              std::shared_ptr<const ClassIndex> classIndex = nullptr);
 
     ~UmlServer();
 
@@ -95,6 +106,10 @@ private:
     std::map<std::string, std::string> sources_;
     std::shared_ptr<ReviewStore> review_;
     std::string title_;
+    // shared_ptr (not a bare pointer): the index is genuinely shared with the
+    // caller (main.cpp builds it and keeps its own copy), and it must outlive
+    // the handlers that read it — being declared before io_/router_ it does.
+    std::shared_ptr<const ClassIndex> classIndex_;
     boost::asio::io_context io_;
     boost::asio::ip::tcp::acceptor acceptor_;
     std::uint16_t assigned_port_{0};

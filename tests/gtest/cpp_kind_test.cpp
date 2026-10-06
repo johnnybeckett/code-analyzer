@@ -95,7 +95,8 @@ TEST(CppKindTest, Rejections) {
 // A C# struct inside a dotted namespace must record kind "struct" and the
 // model-wide `::` namespace form.
 TEST(CSharpKindTest, StructInNamespace) {
-    auto parsed = CSharpParser::parse_file(fixture("StructPoint.cs"));
+    auto classes = CSharpParser::parse_file(fixture("StructPoint.cs"));
+    const Class* parsed = find(classes, "Point");
     ASSERT_NE(parsed, nullptr);
     EXPECT_EQ(parsed->name, "Point");
     EXPECT_EQ(parsed->kind, "struct");
@@ -104,7 +105,8 @@ TEST(CSharpKindTest, StructInNamespace) {
 
 // A C# class keeps kind "class".
 TEST(CSharpKindTest, ClassKind) {
-    auto parsed = CSharpParser::parse_file(fixture("SampleClass.cs"));
+    auto classes = CSharpParser::parse_file(fixture("SampleClass.cs"));
+    const Class* parsed = find(classes, "SampleClass");
     ASSERT_NE(parsed, nullptr);
     EXPECT_EQ(parsed->name, "SampleClass");
     EXPECT_EQ(parsed->kind, "class");
@@ -119,10 +121,34 @@ TEST(PythonKindTest, KindAndMetaclassSkipped) {
         "    def method(self):\n"
         "        return 1\n");
 
-    auto parsed = PythonParser::parse_file(file);
+    auto classes = PythonParser::parse_file(file);
+    const Class* parsed = find(classes, "Foo");
     ASSERT_NE(parsed, nullptr);
     EXPECT_EQ(parsed->name, "Foo");
     EXPECT_EQ(parsed->kind, "class");
     ASSERT_EQ(parsed->inheritance_list.size(), 1u);
     EXPECT_EQ(parsed->inheritance_list[0], "Base");
+}
+
+// A module declaring several classes must yield ALL of them, each carrying
+// its source `file` (the first-class-only limit is gone).
+TEST(PythonKindTest, MultiClassModuleAllCarryFile) {
+    auto file = write_temp("multicls", ".py",
+        "class Alpha:\n"
+        "    def one(self):\n"
+        "        return 1\n"
+        "\n"
+        "class Beta(Alpha):\n"
+        "    def two(self):\n"
+        "        return 2\n");
+
+    auto classes = PythonParser::parse_file(file);
+
+    const Class* alpha = find(classes, "Alpha");
+    ASSERT_NE(alpha, nullptr) << "Alpha missing from multi-class module";
+    EXPECT_EQ(alpha->file, file);
+
+    const Class* beta = find(classes, "Beta");
+    ASSERT_NE(beta, nullptr) << "Beta missing from multi-class module";
+    EXPECT_EQ(beta->file, file);
 }

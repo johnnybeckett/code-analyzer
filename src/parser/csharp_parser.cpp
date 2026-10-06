@@ -1,10 +1,14 @@
 #include "parser/csharp_parser.h"
+#include "parser/call_scanner.h"
 #include "core/model.h"
 #include <iostream>
 #include <fstream>
 #include <regex>
 #include <sstream>
+#include <cctype>
+#include <iterator>
 #include <vector>
+#include <unordered_set>
 #include <filesystem>
 
 namespace {
@@ -100,25 +104,40 @@ std::vector<std::string> split_bases(const std::string& list) {
     return out;
 }
 
+/**
+ * @brief C# keywords that can appear as `<keyword>(` but are not calls
+ *
+ * Stripped by the shared CallScanner so only genuine callee names remain
+ * (`typeof(`, `foreach(`, `lock(`, `sizeof(`, etc.).
+ */
+const std::unordered_set<std::string>& csharp_call_blacklist() {
+    static const std::unordered_set<std::string> blacklist = {
+        "if", "for", "foreach", "while", "switch", "catch", "using",
+        "sizeof", "typeof", "new", "lock", "await", "checked", "unchecked",
+        "throw", "return", "in", "when"
+    };
+    return blacklist;
+}
+
 } // namespace
 
 /**
  * @brief Parse a C# file and extract class information
  * @param file_path Path to the C# file
- * @return Parsed Class object or nullptr if error
+ * @return All classes found in the file (empty on error or no types)
  */
-std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
+std::vector<std::unique_ptr<Class>> CSharpParser::parse_file(const std::string& file_path) {
     // Check if file exists
     if (!std::filesystem::exists(file_path)) {
         std::cerr << "Error: File does not exist - " << file_path << std::endl;
-        return nullptr;
+        return {};
     }
 
     // Read the entire file
     std::ifstream file(file_path);
     if (!file.is_open()) {
         std::cerr << "Error: Could not open file - " << file_path << std::endl;
-        return nullptr;
+        return {};
     }
 
     std::stringstream buffer;
@@ -138,15 +157,22 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
     std::smatch matches;
     std::string::const_iterator search_start(content.cbegin());
 
-    std::unique_ptr<Class> parsed_class = nullptr;
+    std::vector<std::unique_ptr<Class>> classes;
 
     while (std::regex_search(search_start, content.cend(), matches, class_regex)) {
+        // `matches.position(0)` is relative to the advancing `search_start`,
+        // so anchor it absolutely: the 2nd+ type in a file must resolve its
+        // namespace and body against the start of the string, not against the
+        // previous type's end.
+        const size_t class_pos =
+            std::distance(content.cbegin(), search_start) + matches.position(0);
+
         std::string kind = matches[1];
         std::string class_name = matches[3];
         std::string base_classes = matches[5];
 
         // Attribute the type to the innermost `namespace X.Y` enclosing it
-        std::string namespace_path = namespace_at(content, matches.position(0));
+        std::string namespace_path = namespace_at(content, class_pos);
 
         // Create the class object
         auto type = std::make_unique<Class>(class_name, namespace_path);
@@ -173,13 +199,13 @@ std::unique_ptr<Class> CSharpParser::parse_file(const std::string& file_path) {
         }
 
         // Parse methods and fields within the type
-        parse_class_content(content, matches.position(0), type.get());
+        parse_class_content(content, class_pos, type.get());
 
-        parsed_class = std::move(type);
-        break; // For now, we only process the first type found in a file
+        classes.push_back(std::move(type));
+        search_start = matches.suffix().first;
     }
 
-    return parsed_class;
+    return classes;
 }
 
 /**
@@ -254,6 +280,28 @@ void CSharpParser::parse_methods(const std::string& content, Class* class_obj) {
             }
         }
 
+        // A concrete method is followed by a `{` body; brace-match it and
+        // record the callee set for the call graph. Abstract (`;`) and
+        // expression-bodied (`=>`) members have no brace body to scan.
+        // `matches.position(0)` is relative to the advancing `search_start`
+        // (not to the start of the string), so anchor it to an absolute
+        // offset before locating the body brace.
+        const size_t base = std::distance(content.cbegin(), search_start);
+        size_t cursor = base + matches.position(0) + matches.length(0);
+        while (cursor < content.size() &&
+               std::isspace(static_cast<unsigned char>(content[cursor]))) {
+            ++cursor;
+        }
+        if (cursor < content.size() && content[cursor] == '{') {
+            const size_t end_pos = find_matching_brace(content, cursor);
+            if (end_pos != std::string::npos) {
+                const std::string method_body =
+                    content.substr(cursor + 1, end_pos - cursor - 1);
+                method->called_methods = CallScanner::extract(
+                    method_body, csharp_call_blacklist());
+            }
+        }
+
         class_obj->add_method(std::move(method));
         search_start = matches.suffix().first;
     }
@@ -303,9 +351,8 @@ AnalysisResult CSharpParser::parse_project(const std::string& project_path) {
     try {
         for (const auto& entry : std::filesystem::recursive_directory_iterator(project_path)) {
             if (entry.is_regular_file() && entry.path().extension() == ".cs") {
-                auto parsed_class = parse_file(entry.path().string());
-                if (parsed_class) {
-                    result.add_class(std::move(parsed_class));
+                for (auto& cls : parse_file(entry.path().string())) {
+                    result.add_class(std::move(cls));
                 }
             }
         }

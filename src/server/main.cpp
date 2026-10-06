@@ -1,10 +1,14 @@
+#include "server/class_index.h"
 #include "server/uml_server.h"
 #include "server/review_store.h"
+#include "server/source_resolver.h"
+#include "uml/class_loader.h"
 #include "uml/uml_model.h"
 
 #include <arpa/inet.h>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <ifaddrs.h>
 #include <memory>
@@ -128,17 +132,25 @@ int main(int argc, char* argv[]) {
 
     // Preload the allowlisted class source files so `GET /source?path=...` can
     // return them by exact lookup — the server never builds a path from a query.
+    // A recorded path is resolved as-is, then (if relative) under the input
+    // JSON's directory, so the server works from any CWD. The allowlist KEY is
+    // always the exact recorded string the client sent, so the route's
+    // allowlist posture is unchanged.
+    const std::filesystem::path json_dir =
+        std::filesystem::path(input_files.front()).parent_path();
+    const auto source_files = model.source_files();
     std::map<std::string, std::string> sources;
-    for (const auto& path : model.source_files()) {
-        std::ifstream in(path, std::ios::binary);
-        if (!in) {
+    for (const auto& path : source_files) {
+        if (const auto data = server::resolve_source(path, json_dir); data) {
+            sources.emplace(path, std::move(*data));
+        } else {
             std::cerr << "Warning: source file not found; /source will 404 for "
                       << path << "\n";
-            continue;
         }
-        std::ostringstream data;
-        data << in.rdbuf();
-        sources.emplace(path, data.str());
+    }
+    if (!source_files.empty()) {
+        std::cout << "Loaded " << sources.size() << " of " << source_files.size()
+                  << " source file(s) for /source\n";
     }
 
     // In diff mode, review comments are enabled: they persist to a JSON file
@@ -160,9 +172,34 @@ int main(int argc, char* argv[]) {
         title = base(input_files[0]);
     }
 
+    // Build the spatial index backing GET /classes/index and /classes/near:
+    // one record per parsed class object, positions assigned deterministically
+    // by the index (namespace-grouped grid) — a pure function of the input, so
+    // the server and the streaming viewer never drift on coordinates. The
+    // index carries the project's CURRENT classes: the newer file in diff mode,
+    // the single file otherwise (extra inputs are ignored, as elsewhere in
+    // main), so a class that appears in both revisions is indexed once.
+    const std::string& index_file = model.is_diff() ? input_files[1] : input_files[0];
+    std::vector<server::ClassRecord> records;
+    std::size_t unparsed = 0;
+    for (const auto& class_json : uml::JsonClassLoader::parseFileClasses(index_file)) {
+        if (const auto rec = server::ClassIndex::record_from_json(class_json)) {
+            records.push_back(std::move(*rec));
+        } else {
+            ++unparsed;
+        }
+    }
+    if (unparsed != 0) {
+        std::cerr << "Warning: " << unparsed
+                  << " class record(s) could not be parsed into the class index\n";
+    }
+    const auto classIndex = std::make_shared<const server::ClassIndex>(std::move(records));
+    std::cout << "Class index: " << classIndex->size() << " class(es) for /classes/*\n";
+
     server::UmlServer srv(std::move(body), std::move(sources),
                           static_cast<std::uint16_t>(port),
-                          std::move(review), std::move(title));
+                          std::move(review), std::move(title),
+                          classIndex);
     const unsigned int bound_port = srv.local_port();
 
     // Clean shutdown on Ctrl-C / SIGTERM.

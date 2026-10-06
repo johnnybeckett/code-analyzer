@@ -29,6 +29,7 @@ Makefile
 
 # Generated analyzer / docs outputs
 analysis.json
+project.json
 code_analyzer_docs.html
 
 # Local Claude Code session state

@@ -28,7 +28,12 @@ std::vector<std::string> DirectoryFileProvider::files() const {
 
         if (!entry.is_regular_file()) continue;
 
-        files.push_back(entry.path().string());
+        // Anchor to absolute so a relative project root still yields CWD-proof
+        // `file` fields in the JSON (the server later resolves those).
+        // `lexically_normal` strips the `./`/`..`/redundant separators a
+        // relative root would otherwise leave in the path.
+        files.push_back(
+            std::filesystem::absolute(entry.path()).lexically_normal().string());
     }
 
     return files;

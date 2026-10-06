@@ -153,9 +153,10 @@ UmlServer::UmlServer(std::string body,
                      std::map<std::string, std::string> sources,
                      std::uint16_t port,
                      std::shared_ptr<ReviewStore> review,
-                     std::string title)
+                     std::string title,
+                     std::shared_ptr<const ClassIndex> classIndex)
     : body_(std::move(body)), sources_(std::move(sources)), review_(std::move(review)),
-      title_(std::move(title)), acceptor_(io_) {
+      title_(std::move(title)), classIndex_(std::move(classIndex)), acceptor_(io_) {
     tcp::endpoint endpoint(tcp::v4(), port);
     acceptor_.open(endpoint.protocol());
     acceptor_.set_option(net::socket_base::reuse_address(true));
@@ -169,7 +170,7 @@ UmlServer::UmlServer(std::string body,
     // point back at this same router so they document the full API — themselves
     // included. The router is destroyed before the state it holds pointers to
     // (see the member-order note in the header), so no handler outlives state.
-    register_domain_handlers(router_, sources_, review_, title_);
+    register_domain_handlers(router_, sources_, review_, title_, classIndex_.get());
     register_meta_handlers(router_, title_);
 }
 

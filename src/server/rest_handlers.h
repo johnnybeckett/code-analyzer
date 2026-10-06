@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 
+#include "server/class_index.h"
 #include "server/rest_handler.h"
 #include "server/review_store.h"
 
@@ -28,6 +29,46 @@ public:
 
 private:
     const std::map<std::string, std::string>* sources_;
+};
+
+/**
+ * @brief GET /classes/index — the spatial overview of a project's classes.
+ *
+ * Returns the class count, the assigned layout's axis-aligned bounds, the
+ * grid cell size, and a small deterministic sample (a cheap far-field
+ * overview). Nothing here is filesystem-relative: the index was built from
+ * the analyzer's JSON before the server started, so no allowlist is needed.
+ * A null index (viewer run without one) is a clean 501.
+ */
+class IndexHandler : public RestHandler {
+public:
+    explicit IndexHandler(const ClassIndex* index) : index_(index) {}
+
+    RestResponse handle(const Request& req) const override;
+    RestEndpoint describe() const override;
+
+private:
+    const ClassIndex* index_;
+};
+
+/**
+ * @brief GET /classes/near?x=&y=&z=&count=N — the N closest classes.
+ *
+ * The core of the streaming viewer: instead of shipping every class up front
+ * (the RAM problem for a 10k-class project), the client asks for the window
+ * around its current view target. `x`/`y`/`z` are required doubles, `count`
+ * is clamped to [1, ClassIndex::kMaxNearest]. Missing or non-numeric params
+ * are a 400; a null index is a clean 501.
+ */
+class NearestHandler : public RestHandler {
+public:
+    explicit NearestHandler(const ClassIndex* index) : index_(index) {}
+
+    RestResponse handle(const Request& req) const override;
+    RestEndpoint describe() const override;
+
+private:
+    const ClassIndex* index_;
 };
 
 /**
@@ -104,16 +145,19 @@ private:
 };
 
 /**
- * @brief Register the five domain endpoints on the router.
+ * @brief Register the seven domain endpoints on the router.
  *
- * Each handler is injected with the shared state it actually uses (the source
- * allowlist, the review store, the document title) and all of it outlives the
- * handler — UmlServer owns the state and the router.
+ * Each handler is injected with the shared state it actually uses (the
+ * source allowlist, the review store, the document title, the class index)
+ * and all of it outlives the handler — UmlServer owns the state and the
+ * router. `classIndex` may be null (the two `/classes` routes then answer
+ * 501); the others are unaffected.
  */
 void register_domain_handlers(Router& router,
                               const std::map<std::string, std::string>& sources,
                               std::shared_ptr<ReviewStore> review,
-                              const std::string& title);
+                              const std::string& title,
+                              const ClassIndex* classIndex);
 
 }  // namespace server
 

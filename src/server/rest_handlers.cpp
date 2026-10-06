@@ -1,7 +1,9 @@
 #include "server/rest_handlers.h"
 
-#include <boost/json.hpp>
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +26,9 @@ RestResponse json_error(int status, const std::string& msg) {
     r.body = json::serialize(obj);
     return r;
 }
+
+/** @brief Overview size for /classes/index: cheap far-field, bounded. */
+constexpr std::size_t kOverviewSample = 64;
 
 /** @brief The first raw (not percent-decoded) value for `name`, or "". */
 const std::string* first_query(const Request& req, const char* name) {
@@ -67,6 +72,109 @@ RestEndpoint SourceHandler::describe() const {
         {{"path", "query", "string", true, "File path (percent-decoded) as exposed by the server"}},
         {{200, "The file content as plain text"},
          {404, "No such allowlisted source (or path missing)"}}};
+}
+
+RestResponse IndexHandler::handle(const Request&) const {
+    if (!index_) {
+        return json_error(501, "no class index is loaded for this server");
+    }
+
+    const ClassIndexBounds b = index_->bounds();
+    json::object bounds;
+    bounds["min_x"] = b.min_x;
+    bounds["max_x"] = b.max_x;
+    bounds["min_y"] = b.min_y;
+    bounds["max_y"] = b.max_y;
+    bounds["min_z"] = b.min_z;
+    bounds["max_z"] = b.max_z;
+
+    json::array sample;
+    for (const auto& rec : index_->sample(kOverviewSample)) {
+        sample.emplace_back(to_json(rec));
+    }
+
+    json::object obj;
+    obj["count"] = index_->size();
+    obj["bounds"] = std::move(bounds);
+    obj["cellSize"] = index_->cellSize();
+    obj["sample"] = std::move(sample);
+
+    RestResponse r;
+    r.status = 200;
+    r.content_type = "application/json; charset=utf-8";
+    r.body = json::serialize(obj);
+    return r;
+}
+
+RestEndpoint IndexHandler::describe() const {
+    return RestEndpoint{
+        "GET", "/classes/index", "Spatial overview of the project's classes",
+        {},
+        {{200, "The class count, layout bounds, cell size, and a small sample"},
+         {501, "No class index is loaded for this server"}}};
+}
+
+RestResponse NearestHandler::handle(const Request& req) const {
+    auto parse_double = [&req](const char* name) -> std::optional<double> {
+        const std::string* raw = first_query(req, name);
+        if (raw == nullptr) {
+            return std::nullopt;
+        }
+        try {
+            const double v = std::stod(*raw);
+            return std::isfinite(v) ? std::optional<double>(v) : std::nullopt;
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    };
+
+    const std::optional<double> x = parse_double("x");
+    const std::optional<double> y = parse_double("y");
+    const std::optional<double> z = parse_double("z");
+    if (!x || !y || !z) {
+        return json_error(400, "x, y and z are required numeric coordinates");
+    }
+
+    const std::string* raw_count = first_query(req, "count");
+    if (raw_count == nullptr) {
+        return json_error(400, "count is required (positive integer)");
+    }
+    std::size_t count;
+    try {
+        count = std::stoul(*raw_count);
+    } catch (const std::exception&) {
+        return json_error(400, "count must be a positive integer");
+    }
+    count = std::clamp(count, std::size_t{1}, ClassIndex::kMaxNearest);
+
+    if (!index_) {
+        return json_error(501, "no class index is loaded for this server");
+    }
+
+    json::array out;
+    for (const auto& rec : index_->nearest(count, *x, *y, *z)) {
+        out.emplace_back(to_json(rec));
+    }
+
+    RestResponse r;
+    r.status = 200;
+    r.content_type = "application/json; charset=utf-8";
+    r.body = json::serialize(out);
+    return r;
+}
+
+RestEndpoint NearestHandler::describe() const {
+    return RestEndpoint{
+        "GET", "/classes/near", "The N classes closest to a coordinate (streaming viewer)",
+        {{"x", "query", "number", true, "X coordinate in layout space"},
+         {"y", "query", "number", true, "Y coordinate in layout space"},
+         {"z", "query", "number", true, "Z coordinate in layout space"},
+         {"count", "query", "integer", true,
+          std::string{"How many classes to return (clamped to [1, "} +
+              std::to_string(ClassIndex::kMaxNearest) + "]"}},
+        {{200, "The nearest classes, closest first"},
+         {400, "Missing or non-numeric x, y, z, or count"},
+         {501, "No class index is loaded for this server"}}};
 }
 
 RestResponse RenderHandler::handle(const Request& req) const {
@@ -247,7 +355,12 @@ RestEndpoint ExportReviewHandler::describe() const {
 void register_domain_handlers(Router& router,
                               const std::map<std::string, std::string>& sources,
                               std::shared_ptr<ReviewStore> review,
-                              const std::string& title) {
+                              const std::string& title,
+                              const ClassIndex* classIndex) {
+    // The /classes routes come first so they lead GET /api and /openapi.json;
+    // both answer 501 when `classIndex` is null.
+    router.register_handler(std::make_shared<IndexHandler>(classIndex));
+    router.register_handler(std::make_shared<NearestHandler>(classIndex));
     router.register_handler(std::make_shared<SourceHandler>(&sources));
     router.register_handler(std::make_shared<RenderHandler>(&sources));
     router.register_handler(std::make_shared<CommentsGetHandler>(review));

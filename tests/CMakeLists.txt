@@ -7,7 +7,9 @@ add_executable(code_analyzer_tests
     ${CMAKE_SOURCE_DIR}/src/server/review_store.cpp
     ${CMAKE_SOURCE_DIR}/src/server/http_util.cpp
     ${CMAKE_SOURCE_DIR}/src/server/rest_handlers.cpp
+    ${CMAKE_SOURCE_DIR}/src/server/source_resolver.cpp
     ${CMAKE_SOURCE_DIR}/src/server/openapi.cpp
+    ${CMAKE_SOURCE_DIR}/src/server/class_index.cpp
     gtest/registry_test.cpp
     gtest/provider_test.cpp
     gtest/observer_test.cpp
@@ -21,6 +23,9 @@ add_executable(code_analyzer_tests
     gtest/thread_pool_test.cpp
     gtest/csharp_test.cpp
     gtest/cpp_kind_test.cpp
+    gtest/source_file_fix_test.cpp
+    gtest/call_graph_test.cpp
+    gtest/class_index_test.cpp
 )
 
 # Tests locate shared fixtures (test_files/) relative to the source root
