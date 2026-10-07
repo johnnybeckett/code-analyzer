@@ -117,6 +117,23 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             border-left: 1px solid var(--border);
             padding: 16px;
         }
+
+        /* Resizable sidebar handle */
+        #sidebar-resize-handle {
+            position: absolute;
+            left: -5px;
+            top: 0;
+            bottom: 0;
+            width: 10px;
+            cursor: col-resize;
+            z-index: 100;
+            background: var(--border);
+            opacity: 0.3;
+        }
+
+        #sidebar-resize-handle:hover {
+            opacity: 0.6;
+        }
         #sidebar h2 { margin: 0 0 12px; font-size: 16px; }
         #controls {
             position: absolute;
@@ -2022,10 +2039,14 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             if (hint) hint.textContent =
                 'one finger: orbit · two-finger pinch: zoom · ' +
                 'two-finger drag: pan · double-tap a class to focus · ' +
+                'long press: context menu · ' +
                 'bottom pad: move, zoom, next/prev, center';
         }
 
         let touchPrev = null;    // {x, y, d} reference point of the last frame
+        let longPressTimer = null;
+        let longPressTriggered = false;
+
         container.addEventListener('touchstart', e => {
             if (e.touches.length === 0) return;
             autoRotate = false;
@@ -2033,6 +2054,13 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             const t = e.touches;
             if (t.length === 1) {
                 touchPrev = { x: t[0].clientX, y: t[0].clientY, d: null };
+                // Set up long press timer
+                longPressTimer = setTimeout(() => {
+                    if (!longPressTriggered && touchPrev) {
+                        longPressTriggered = true;
+                        openCtxMenu(t[0].clientX, t[0].clientY, null);
+                    }
+                }, 500); // 500ms long press
             } else {
                 touchPrev = {
                     x: (t[0].clientX + t[1].clientX) / 2,
@@ -2040,6 +2068,12 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                     d: Math.hypot(t[0].clientX - t[1].clientX,
                                  t[0].clientY - t[1].clientY)
                 };
+                // Clear long press timer when multi-touch starts
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                    longPressTriggered = false;
+                }
             }
         }, { passive: true });
 
@@ -2047,6 +2081,18 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             if (!touchPrev) return;
             e.preventDefault();     // keep the page from scrolling / zooming
             const t = e.touches;
+
+            // Cancel long press if finger moves significantly
+            if (t.length === 1 && longPressTimer && !longPressTriggered) {
+                const dx = Math.abs(t[0].clientX - touchPrev.x);
+                const dy = Math.abs(t[0].clientY - touchPrev.y);
+                if (dx > 10 || dy > 10) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                    longPressTriggered = false;
+                }
+            }
+
             if (t.length === 1) {
                 // Finger went back to one after a two-finger gesture:
                 // re-anchor instead of dragging from the old centroid.
@@ -2090,7 +2136,15 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         }, { passive: false });
 
         const touchEnd = e => {
-            if (e.touches.length === 0) touchPrev = null;
+            if (e.touches.length === 0) {
+                touchPrev = null;
+                // Clear long press timer on touch end
+                if (longPressTimer) {
+                    clearTimeout(longPressTimer);
+                    longPressTimer = null;
+                    longPressTriggered = false;
+                }
+            }
         };
         container.addEventListener('touchend', touchEnd);
         container.addEventListener('touchcancel', touchEnd);
@@ -2573,16 +2627,45 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 if (n.cmake !== inCmakeMode) return;
                 if (!n.external) realVisible.set(n.name, classVisible(n.name));
             });
+
+            // For namespace grouping, we want to ensure that when a class is visible,
+            // all related classes (inheritance chain) are also visible
+            const enhancedVisibility = new Map();
+            nodes.forEach(n => {
+                if (n.cmake !== inCmakeMode) return;
+                if (!n.external) {
+                    const isVisible = realVisible.get(n.name);
+                    enhancedVisibility.set(n.name, isVisible);
+                    if (isVisible) {
+                        // If this class is visible, make sure its inheritance chain is also visible
+                        const classObj = n.cls;
+                        if (classObj && classObj.inheritance) {
+                            classObj.inheritance.forEach(baseName => {
+                                const baseNode = nodes.get(baseName);
+                                if (baseNode && !enhancedVisibility.get(baseName)) {
+                                    enhancedVisibility.set(baseName, true);
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    // Unresolved base (or alias stub): shown while any of its
+                    // dependents/children is shown
+                    const isVisible = edgeObjs.some(e => e.to === n.name && realVisible.get(e.from));
+                    enhancedVisibility.set(n.name, isVisible);
+                }
+            });
+
             lodPool = [];
             nodes.forEach(n => {
                 if (n.cmake !== inCmakeMode) return;
                 let visible;
                 if (!n.external) {
-                    visible = realVisible.get(n.name);
+                    visible = enhancedVisibility.get(n.name);
                 } else {
                     // Unresolved base (or alias stub): shown while any of its
                     // dependents/children is shown
-                    visible = edgeObjs.some(e => e.to === n.name && realVisible.get(e.from));
+                    visible = edgeObjs.some(e => e.to === n.name && enhancedVisibility.get(e.from));
                 }
                 if (visible) lodPool.push(n);
             });
@@ -3709,6 +3792,58 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             openTab(p);
         }
 
+        // Generate a URL that represents the current view state
+        function generateCurrentUrl() {
+            const url = new URL(window.location.href);
+
+            // Add current focus class if there's one focused
+            if (focus.active && pinned.size > 0) {
+                const focusedNode = [...pinned.values()][0];
+                if (focusedNode && focusedNode.name) {
+                    url.searchParams.set('focus', focusedNode.name);
+                }
+            }
+
+            // Add current layout mode
+            url.searchParams.set('layout', layoutSelect.value);
+
+            // Add current zoom level
+            url.searchParams.set('zoom', view.dist.toFixed(2));
+
+            // Add current theme
+            url.searchParams.set('theme', themeSelect.value);
+
+            // Add current filters if any
+            const nameFilter = document.getElementById('filterInput').value;
+            const nsFilter = document.getElementById('nsFilterInput').value;
+            if (nameFilter) url.searchParams.set('filter', nameFilter);
+            if (nsFilter) url.searchParams.set('nsfilter', nsFilter);
+
+            return url.toString();
+        }
+
+        // Copy the current URL to clipboard
+        function copyCurrentUrl() {
+            const url = generateCurrentUrl();
+            navigator.clipboard.writeText(url).then(() => {
+                // Show user feedback - could be a toast or similar
+                console.log('URL copied to clipboard:', url);
+            }).catch(err => {
+                console.error('Failed to copy URL: ', err);
+                // Fallback for browsers that don't support clipboard API
+                const textArea = document.createElement('textarea');
+                textArea.value = url;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    console.error('Failed to copy URL via execCommand: ', err);
+                }
+                document.body.removeChild(textArea);
+            });
+        }
+
         // Build and show the menu at (x, y), clamped to the viewport. `rowEl` is
         // the diff row (or null when right-clicking a gap / non-row), which
         // enables the row-specific items.
@@ -3735,6 +3870,9 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             menu.appendChild(ctxItem('Previous file  [', many, () => stepFile(-1)));
             menu.appendChild(ctxItem('Next file  ]', many, () => stepFile(1)));
             menu.appendChild(ctxItem('Add comment here', hasRow, () => addCommentHere(ctxTargetRow)));
+            menu.appendChild(ctxSep());
+            // Add copy link to clipboard option
+            menu.appendChild(ctxItem('Copy link to clipboard', true, copyCurrentUrl));
             menu.appendChild(ctxSep());
             const exp = document.createElement('a');
             exp.className = 'ctxItem';
@@ -3805,6 +3943,68 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             e.preventDefault();
             document.body.style.userSelect = 'none';
             document.body.style.cursor = 'ns-resize';
+        });
+
+        // --- Drag the sidebar resize handle to resize the sidebar ------
+        let sidebarResizing = false;
+        const sidebar = document.getElementById('sidebar');
+        const sidebarResizeHandle = document.createElement('div');
+        sidebarResizeHandle.id = 'sidebar-resize-handle';
+        sidebar.appendChild(sidebarResizeHandle);
+
+        sidebarResizeHandle.addEventListener('mousedown', e => {
+            e.preventDefault();
+            sidebarResizing = true;
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (sidebarResizing) {
+                const newWidth = window.innerWidth - e.clientX;
+                // Clamp to reasonable values: 200px minimum, 80% maximum of window width
+                const clampedWidth = Math.max(200, Math.min(newWidth, window.innerWidth * 0.8));
+                sidebar.style.width = clampedWidth + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (sidebarResizing) {
+                sidebarResizing = false;
+                document.body.style.userSelect = '';
+                document.body.style.cursor = '';
+            }
+        });
+
+        // --- Drag the sidebar resize handle to resize the sidebar ------
+        let sidebarResizing = false;
+        const sidebar = document.getElementById('sidebar');
+        const sidebarResizeHandle = document.createElement('div');
+        sidebarResizeHandle.id = 'sidebar-resize-handle';
+        sidebar.appendChild(sidebarResizeHandle);
+
+        sidebarResizeHandle.addEventListener('mousedown', e => {
+            e.preventDefault();
+            sidebarResizing = true;
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (sidebarResizing) {
+                const newWidth = window.innerWidth - e.clientX;
+                // Clamp to reasonable values: 200px minimum, 80% maximum of window width
+                const clampedWidth = Math.max(200, Math.min(newWidth, window.innerWidth * 0.8));
+                sidebar.style.width = clampedWidth + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (sidebarResizing) {
+                sidebarResizing = false;
+                document.body.style.userSelect = '';
+                document.body.style.cursor = '';
+            }
         });
         window.addEventListener('mousemove', e => {
             if (!paneDragging) return;
