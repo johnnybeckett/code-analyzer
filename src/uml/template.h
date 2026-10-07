@@ -2772,14 +2772,35 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                     = t + ' CMake target' + (t === 1 ? '' : 's') + ' shown';
                 return;
             }
-            const cards = [...document.querySelectorAll('.classCard')];
-            const shown = cards.filter(c => {
-                if (c.style.display === 'none') return false;
-                const group = c.closest('.nsChildren');
-                return !(group && group.style.display === 'none');
-            }).length;
-            document.getElementById('stats').textContent
-                = shown + ' of ' + classes.length + ' classes shown';
+
+            // Count actual classes that are visible in the 3D scene
+            const shown = [...nodes.values()].filter(n => !n.cmake && n.mesh.visible).length;
+
+            // If in namespace mode, also show per-namespace counts
+            if (currentMode === 'namespace') {
+                const namespaceCounts = new Map();
+                for (const n of nodes.values()) {
+                    if (!n.cmake && n.mesh.visible) {
+                        const key = groupKey(n);
+                        namespaceCounts.set(key, (namespaceCounts.get(key) || 0) + 1);
+                    }
+                }
+
+                let statsText = shown + ' of ' + classes.length + ' classes shown';
+                if (namespaceCounts.size > 0) {
+                    statsText += ' - Namespaces: ';
+                    const counts = [];
+                    for (const [ns, count] of namespaceCounts.entries()) {
+                        counts.push(`${ns || '(global)'}: ${count}`);
+                    }
+                    statsText += counts.join(', ');
+                }
+
+                document.getElementById('stats').textContent = statsText;
+            } else {
+                document.getElementById('stats').textContent
+                    = shown + ' of ' + classes.length + ' classes shown';
+            }
         }
 
         // --- Visibility: apply the diff, name and namespace filters together
