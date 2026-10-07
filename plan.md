@@ -1,24 +1,39 @@
-# C++23 Project Plan — superseded
+# Implementation Plan: Enhanced UML Viewer Layouts
 
-This was the original implementation plan for the code analyzer (parse
-C++/C#/Python projects into a structured JSON class model, for a difference
-mode and a UML visualizer). **It no longer matches the code — do not follow
-its layout, phases, or dependency list.**
+## Overview
+Implement enhanced layout engines for both CMake dependency visualization and class inheritance relationships to improve the clarity and understandability of complex code structures.
 
-Why it is stale (verified against the tree):
-- The prescribed tree does not exist: no `src/utils/`, no
-  `tests/integration/`, no `cmake/` directory (CMake lives at the repo root);
-  `core/visitor.cpp` / `core/factory.cpp` were never created (the real pieces
-  are `src/core/report_visitor.*`, `src/core/parser_registry.*`,
-  `src/core/provider_registry.*`).
-- The Boost list (Spirit, Graph, PropertyTree, Algorithm) is not what the
-  project uses: **Boost.JSON (linked) + header-only Boost.Beast/Asio, floor
-  1.71** (`CMakeLists.txt:17`). The parsers are line/regex-based
-  (`src/parser/`), not grammar-library based.
-- The plan's goals (inheritance / call / visibility tracking, a JSON schema
-  for diff mode + UML, white- and black-box gtests) are met by the built
-  system.
+## Goals
+1. Create a hierarchical layout engine for CMake views that minimizes dependency crossover
+2. Add a similar hierarchical approach for class inheritance visualization
+3. Maintain backward compatibility with existing layouts
+4. Provide intuitive UI controls to switch between layout modes
 
-**Live tracking docs: [`next.md`](next.md) (steps + status) and
-[`progress.md`](progress.md) (done vs outstanding).** Current layout:
-[`agents/Claude.md`](agents/Claude.md). Coding standard: [`AGENTS.md`](AGENTS.md).
+## Implementation Details
+
+### 1. CMake Layout Engine
+- Replace circular layout with hierarchical approach using topological sorting
+- Organize targets in layers based on dependency relationships
+- Minimize edge crossings and visual clutter
+- Maintain same API for compatibility
+
+### 2. Class Inheritance Layout
+- Add new "Hierarchical (inheritance)" layout option
+- Use topological sorting to organize classes by inheritance relationships
+- Base classes positioned above derived classes
+- Integrate with existing UI controls
+
+### 3. Technical Approach
+- Implement topological sorting algorithms for dependency analysis
+- Create layered positioning that reduces visual complexity
+- Maintain performance with efficient graph traversal
+- Ensure proper integration with existing three.js rendering system
+
+## Files to Modify
+- `src/uml/template.h` - Main HTML template with JavaScript layout implementations
+
+## User Benefits
+- Clearer visualization of CMake target dependencies
+- Better understanding of class inheritance hierarchies  
+- Reduced visual clutter in complex diagrams
+- Intuitive switching between layout modes

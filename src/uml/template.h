@@ -761,6 +761,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             <option value="linear">Linear (hierarchy)</option>
             <option value="namespace">Grouped by namespace</option>
             <option value="circular">Circular</option>
+            <option value="hierarchical">Hierarchical (inheritance)</option>
             <option value="cmake" style="display:none">CMake</option>
         </select>
         <div id="nsLevelWrap" style="display:none">
@@ -1419,6 +1420,101 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             laid.forEach(n => { n.z -= cz; });
         }
 
+        // Hierarchical: classes arranged in a dependency hierarchy based on inheritance
+        // relationships, with base classes above derived classes.
+        function layoutHierarchical() {
+            const list = [...nodes.values()]
+                .filter(n => !n.cmake)  // Only apply to regular classes, not CMake targets
+                .sort((a, b) => a.name.localeCompare(b.name));
+            if (!list.length) return;
+
+            // Build inheritance graph for topological sorting
+            const inDegree = new Map();  // class -> number of incoming dependencies (base classes)
+            const outEdges = new Map();  // class -> list of outgoing dependent classes
+
+            // Initialize all nodes with zero in-degree
+            for (const n of list) {
+                inDegree.set(n.name, 0);
+                outEdges.set(n.name, []);
+            }
+
+            // Calculate in-degrees and build dependency map from inheritance edges
+            for (const edge of edges) {
+                const from = edge.from;
+                const to = edge.to;
+
+                // Only count dependencies that are within our known classes
+                if (inDegree.has(from) && inDegree.has(to)) {
+                    // Inheritance relationships are from child to parent, so we increment
+                    // the in-degree of the parent (to) class
+                    inDegree.set(to, inDegree.get(to) + 1);
+                    outEdges.get(from).push(to);
+                }
+            }
+
+            // Topological sort to determine layering
+            const layers = [];
+            const queue = [];
+
+            // Find all nodes with no incoming dependencies (in-degree = 0)
+            for (const [target, degree] of inDegree.entries()) {
+                if (degree === 0) {
+                    queue.push(target);
+                }
+            }
+
+            // Process nodes in topological order to create layers
+            while (queue.length > 0) {
+                const layer = [];
+                const size = queue.length;
+
+                for (let i = 0; i < size; i++) {
+                    const target = queue.shift();
+                    layer.push(target);
+
+                    // For each dependent of this node, reduce its in-degree
+                    for (const dependent of outEdges.get(target)) {
+                        const newDegree = inDegree.get(dependent) - 1;
+                        inDegree.set(dependent, newDegree);
+
+                        if (newDegree === 0) {
+                            queue.push(dependent);
+                        }
+                    }
+                }
+
+                layers.push(layer);
+            }
+
+            // Position nodes in layers
+            const layerSpacing = 25;
+            const nodeSpacing = 15;
+            let y = 0;
+
+            for (const layer of layers) {
+                // Sort nodes within each layer by name for consistent positioning
+                layer.sort();
+
+                // Calculate starting x position to center the layer
+                const totalWidth = (layer.length - 1) * nodeSpacing;
+                const startX = -totalWidth / 2;
+
+                let x = startX;
+                for (const className of layer) {
+                    const node = nodes.get(className);
+                    if (node) {
+                        node.x = x;
+                        node.y = y;
+                        node.z = 0;
+                        node.rotY = 0;
+                        x += nodeSpacing;
+                    }
+                }
+
+                y += layerSpacing;
+            }
+        }
+
         // Namespace: classes are grouped by namespace, falling back to the
         // source-file directory; each group sits in its own labelled frame.
         // Group key: the first `level` "::"-separated segments of the
@@ -1526,28 +1622,99 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             placeRing(list);
         }
 
-        // CMake: the analyzed project's targets stand in one flat ring on the
-        // x-y plane (z = 0, front-facing at the default camera pitch); name
-        // order keeps the graph readable, aliases render as dashed stubs and
-        // target_link_libraries arrows cross the center.
+        // CMake: the analyzed project's targets stand in a hierarchical layout
+        // that minimizes dependency crossings. The targets are arranged in
+        // layers based on their dependency relationships, with dependencies
+        // flowing from top to bottom.
         function layoutCmake() {
             const list = [...nodes.values()]
                 .filter(n => n.cmake)
                 .sort((a, b) => a.name.localeCompare(b.name));
-            const N = list.length;
-            if (!N) return;
-            const GAP = 3;
-            const maxW = Math.max(...list.map(n => n.w));
-            let R = maxW + GAP * 2;
-            if (N > 1) R = Math.max(R, (maxW / 2 + GAP) / Math.sin(Math.PI / N));
-            const TWO_PI = Math.PI * 2;
-            list.forEach((n, i) => {
-                const a = (i + 0.5) * TWO_PI / N;
-                n.x = R * Math.cos(a);
-                n.y = R * Math.sin(a);
-                n.z = 0;
-                n.rotY = 0;
-            });
+            if (!list.length) return;
+
+            // Build dependency graph for topological sorting
+            const inDegree = new Map();  // target -> number of incoming dependencies
+            const outEdges = new Map();  // target -> list of outgoing dependent targets
+
+            // Initialize all nodes with zero in-degree
+            for (const n of list) {
+                inDegree.set(n.name, 0);
+                outEdges.set(n.name, []);
+            }
+
+            // Calculate in-degrees and build dependency map
+            for (const edge of edgesCmake) {
+                const from = edge.from;
+                const to = edge.to;
+
+                // Only count dependencies that are within our known targets
+                if (inDegree.has(from) && inDegree.has(to)) {
+                    inDegree.set(to, inDegree.get(to) + 1);
+                    outEdges.get(from).push(to);
+                }
+            }
+
+            // Topological sort to determine layering
+            const layers = [];
+            const queue = [];
+
+            // Find all nodes with no incoming dependencies (in-degree = 0)
+            for (const [target, degree] of inDegree.entries()) {
+                if (degree === 0) {
+                    queue.push(target);
+                }
+            }
+
+            // Process nodes in topological order to create layers
+            while (queue.length > 0) {
+                const layer = [];
+                const size = queue.length;
+
+                for (let i = 0; i < size; i++) {
+                    const target = queue.shift();
+                    layer.push(target);
+
+                    // For each dependent of this node, reduce its in-degree
+                    for (const dependent of outEdges.get(target)) {
+                        const newDegree = inDegree.get(dependent) - 1;
+                        inDegree.set(dependent, newDegree);
+
+                        if (newDegree === 0) {
+                            queue.push(dependent);
+                        }
+                    }
+                }
+
+                layers.push(layer);
+            }
+
+            // Position nodes in layers
+            const layerSpacing = 25;
+            const nodeSpacing = 15;
+            let y = 0;
+
+            for (const layer of layers) {
+                // Sort nodes within each layer by name for consistent positioning
+                layer.sort();
+
+                // Calculate starting x position to center the layer
+                const totalWidth = (layer.length - 1) * nodeSpacing;
+                const startX = -totalWidth / 2;
+
+                let x = startX;
+                for (const targetName of layer) {
+                    const node = nodes.get(targetName);
+                    if (node) {
+                        node.x = x;
+                        node.y = y;
+                        node.z = 0;
+                        node.rotY = 0;
+                        x += nodeSpacing;
+                    }
+                }
+
+                y += layerSpacing;
+            }
         }
 
         // --- Generalization arrows: stem + hollow triangle at the superclass ---
@@ -1702,6 +1869,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             if (mode === 'namespace') layoutNamespaces();
             else if (mode === 'circular') { currentGroups = []; layoutCircular(); }
             else if (mode === 'cmake') { currentGroups = []; layoutCmake(); }
+            else if (mode === 'hierarchical') { currentGroups = []; layoutHierarchical(); }
             else { currentGroups = []; layoutLinear(); }
             for (const n of nodes.values()) {
                 n.mesh.position.set(n.x, n.y, n.z);
