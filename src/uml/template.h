@@ -169,6 +169,43 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         .legend .i { font-style: italic; }
         #hint { font-size: 11px; color: var(--faint); margin-top: 8px; }
         #stats { margin-top: 6px; font-size: 12px; color: var(--muted); }
+        #touchpad {
+            display: none;
+            position: fixed;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 40;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+        }
+        body.touch #touchpad { display: block; }
+        #touchpad .pad {
+            display: grid;
+            grid-template-columns: repeat(3, 48px);
+            grid-auto-rows: 40px;
+            gap: 6px;
+            place-items: stretch;
+        }
+        #touchpad button {
+            width: 48px;
+            height: 40px;
+            font-size: 18px;
+            line-height: 1;
+            color: var(--fg);
+            background: var(--panel, rgba(128, 128, 128, 0.15));
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #touchpad button:active { opacity: 0.6; }
         .classCard {
             background: var(--bg);
             border: 1px solid var(--border);
@@ -742,6 +779,19 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         <div id="hint">drag: orbit &middot; wheel / ctrl+drag: zoom &middot; shift+drag: pan &middot; alt: fine &middot; double-click a class to focus, or double-click a member&rsquo;s type to jump to that class, or double-click an inheritance line to jump to its far end &middot; click a class name in the sidebar to focus &middot; click a type in the source pane to jump to it &middot; keys: n / &rarr; next class &middot; p / &larr; previous class &middot; c center view &middot; w / a / s / d move the view</div>
         <div id="stats"></div>
         <div id="diffStats" style="display:none"></div>
+        </div>
+    </div>
+    <div id="touchpad" aria-label="touch controls">
+        <div class="pad">
+            <button data-act="prev"   title="Previous class" type="button">&lsaquo;</button>
+            <button data-act="up"     title="Move up"    type="button">&#8593;</button>
+            <button data-act="zoomin" title="Zoom in"    type="button">+</button>
+            <button data-act="left"   title="Move left"  type="button">&#8592;</button>
+            <button data-act="center" title="Center view" type="button">&#9678;</button>
+            <button data-act="zoomout" title="Zoom out"  type="button">&minus;</button>
+            <button data-act="right"  title="Move right" type="button">&#8594;</button>
+            <button data-act="down"   title="Move down"  type="button">&#8595;</button>
+            <button data-act="next"   title="Next class" type="button">&rsaquo;</button>
         </div>
     </div>
     <div id="sidebar"><h2>Classes</h2></div>
@@ -1905,6 +1955,7 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
         })();
 
         container.addEventListener('mousedown', e => {
+            if (touchMode) return;  // touch devices use the touch model below
             if (e.button !== 0) return;  // left button only (others may context-menu)
             autoRotate = false;
             focus.active = false;
@@ -1953,6 +2004,127 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
             }
             streaming.onMove();   // zoom changes what's near the target
         }, { passive: false });
+
+        // --- Touch / mobile controls -------------------------------------
+        // On a coarse pointer (phone, tablet) there is no wheel and no
+        // modifier keys, so the mouse model above does not apply. Detect it
+        // once and switch to the native touch model:
+        //   one finger        -> orbit  (same yaw/pitch maths as a left drag)
+        //   two-finger pinch  -> zoom   (camera dist)
+        //   two-finger drag   -> pan    (slide the target, like shift+drag)
+        //   button pad        -> move / zoom / next / prev / center
+        // PC browsers keep the mouse model; the pad stays hidden.
+        const touchMode = (navigator.maxTouchPoints || 0) > 0 ||
+            (window.matchMedia && matchMedia('(pointer: coarse)').matches);
+        if (touchMode) {
+            document.body.classList.add('touch');
+            const hint = document.getElementById('hint');
+            if (hint) hint.textContent =
+                'one finger: orbit · two-finger pinch: zoom · ' +
+                'two-finger drag: pan · double-tap a class to focus · ' +
+                'bottom pad: move, zoom, next/prev, center';
+        }
+
+        let touchPrev = null;    // {x, y, d} reference point of the last frame
+        container.addEventListener('touchstart', e => {
+            if (e.touches.length === 0) return;
+            autoRotate = false;
+            focus.active = false;
+            const t = e.touches;
+            if (t.length === 1) {
+                touchPrev = { x: t[0].clientX, y: t[0].clientY, d: null };
+            } else {
+                touchPrev = {
+                    x: (t[0].clientX + t[1].clientX) / 2,
+                    y: (t[0].clientY + t[1].clientY) / 2,
+                    d: Math.hypot(t[0].clientX - t[1].clientX,
+                                 t[0].clientY - t[1].clientY)
+                };
+            }
+        }, { passive: true });
+
+        container.addEventListener('touchmove', e => {
+            if (!touchPrev) return;
+            e.preventDefault();     // keep the page from scrolling / zooming
+            const t = e.touches;
+            if (t.length === 1) {
+                // Finger went back to one after a two-finger gesture:
+                // re-anchor instead of dragging from the old centroid.
+                if (touchPrev.d !== null) {
+                    touchPrev = { x: t[0].clientX, y: t[0].clientY, d: null };
+                    return;
+                }
+                const dx = t[0].clientX - touchPrev.x,
+                      dy = t[0].clientY - touchPrev.y;
+                touchPrev.x = t[0].clientX; touchPrev.y = t[0].clientY;
+                view.yaw += dx * (view.invertH ? -1 : 1) * 0.005;
+                view.pitch = clamp(view.pitch + dy * (view.invertV ? -1 : 1) * 0.005,
+                                   -1.4, 1.4);
+            } else if (t.length === 2) {
+                const cx = (t[0].clientX + t[1].clientX) / 2,
+                      cy = (t[0].clientY + t[1].clientY) / 2,
+                      d  = Math.hypot(t[0].clientX - t[1].clientX,
+                                     t[0].clientY - t[1].clientY);
+                if (touchPrev.d !== null && d > 0) {
+                    view.dist = clamp(view.dist * (touchPrev.d / d),
+                                      MIN_DIST, MAX_DIST);
+                }
+                if (touchPrev.d === null) {
+                    // First two-finger frame: anchor, no delta yet.
+                    touchPrev.x = cx; touchPrev.y = cy; touchPrev.d = d;
+                    streaming.onMove();
+                    return;
+                }
+                const dx = cx - touchPrev.x, dy = cy - touchPrev.y;
+                const s = worldPerPixel();
+                const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+                const cyw = Math.cos(view.yaw),  syw = Math.sin(view.yaw);
+                const rx = cyw,    ry = 0,   rz = -syw;        // camera right
+                const ux = -sp*syw, uy = cp, uz = -sp*cyw;     // camera up
+                view.target.x += (-dx * rx + dy * ux) * s;
+                view.target.y += (-dx * ry + dy * uy) * s;
+                view.target.z += (-dx * rz + dy * uz) * s;
+                touchPrev.x = cx; touchPrev.y = cy; touchPrev.d = d;
+            }
+            streaming.onMove();   // refresh the streamed window (no-op when small)
+        }, { passive: false });
+
+        const touchEnd = e => {
+            if (e.touches.length === 0) touchPrev = null;
+        };
+        container.addEventListener('touchend', touchEnd);
+        container.addEventListener('touchcancel', touchEnd);
+
+        // On-screen button pad (visible only on touch devices): the four
+        // arrows hold-to-move through the same heldKeys / moveView() path as
+        // the w / a / s / d keys; the rest are one-shot actions.
+        const pad = document.getElementById('touchpad');
+        if (pad) {
+            const hold = { up: 'w', down: 's', left: 'a', right: 'd' };
+            const zoomStep = () => streaming.onMove();
+            const oneShot = {
+                zoomin:  () => { view.dist = clamp(view.dist / 1.25, MIN_DIST, MAX_DIST); zoomStep(); },
+                zoomout: () => { view.dist = clamp(view.dist * 1.25, MIN_DIST, MAX_DIST); zoomStep(); },
+                center:  () => navCenter(),
+                prev:    () => navTo(-1),
+                next:    () => navTo(1)
+            };
+            pad.querySelectorAll('button').forEach(btn => {
+                const act = btn.dataset.act;
+                if (hold[act]) {
+                    btn.addEventListener('pointerdown', e => {
+                        e.preventDefault();
+                        heldKeys.add(hold[act]);
+                    });
+                    const release = () => heldKeys.delete(hold[act]);
+                    btn.addEventListener('pointerup', release);
+                    btn.addEventListener('pointercancel', release);
+                    btn.addEventListener('pointerleave', release);
+                } else if (oneShot[act]) {
+                    btn.addEventListener('click', () => oneShot[act]());
+                }
+            });
+        }
 
         // Double-click a class to point the camera at it; a double-click on
         // a member row jumps to the class named by that member's type

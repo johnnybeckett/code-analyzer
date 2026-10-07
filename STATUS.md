@@ -1,86 +1,37 @@
-# Project Status - Code Analyzer
+# Project Status — Code Analyzer
 
-## Overview
-This document tracks the implementation progress of the C++23 code analysis tool according to the established plan.
+Short, verified status. Depth lives elsewhere — [`progress.md`](progress.md)
+(mandate tracking: done vs outstanding), [`agents/Claude.md`](agents/Claude.md)
+(module map, build, invariants), [`AGENTS.md`](AGENTS.md) (the standard).
+This file is a pointer page, not a second tracker.
 
-## Current Status: In Progress
+## What is built
+- **Executables** — `CodeAnalyzer` (C++/C#/Python project → JSON class model),
+  `UmlServer` (Boost.Beast/Asio REST server over that model),
+  `DocumentationGenerator` (`CMakeLists.txt:44,61,73`).
+- **Parsers** — all three languages implemented and tested:
+  `src/parser/{cpp,csharp,python}_parser.*` plus the shared
+  `src/parser/call_scanner.*`; per-language suites under `tests/gtest/`.
+- **Server routes** — `/`, `/api`, `/openapi.json`, `/source`,
+  `/classes/index`, `/classes/near`, `/render`, `/comments` (GET+POST),
+  `/export/review` (registered in `src/server/rest_handlers.cpp:362-368` +
+  `src/server/openapi.cpp`).
+- **Viewer** — self-contained three.js page (`src/uml/template.h`): 3D classes,
+  diff mode, call graph, source pane, spatial streaming, invert toggles,
+  Ctrl+wheel content zoom.
+- **Tests** — gtest white-box (per class/method) and black-box (raw-socket
+  HTTP, JSON round-trips) in `tests/gtest/`; one `ctest` entry.
 
-### Completed Tasks
-1. ✅ Project structure established with proper directory organization
-2. ✅ Core data model implemented (model.h/cpp)
-3. ✅ Main application entry point created (main.cpp)
-4. ✅ CMake build system configuration with Boost integration
-5. ✅ Documentation files created (README.md, agents/Claude.md, plan.md)
-6. ✅ Basic parser interfaces created for all supported languages
-7. ✅ Design patterns and Boost library integration documented in plan
+## Current state
+- **Green** — `ctest --test-dir build` → `100% tests passed` (verified
+  2026-10-07; the current build carries 141 cases — 139 at `608267b` plus the
+  in-progress touch-model pair).
+- **Dependencies** — Boost.JSON (linked) + header-only Boost.Beast/Asio;
+  floor Boost 1.71 (`CMakeLists.txt:17`). No other Boost components.
+- No version is declared (`project(CodeAnalyzer LANGUAGES CXX`,
+  `CMakeLists.txt:2`) — none is claimed here.
 
-### In Progress Tasks
-1. ⏳ Implementation of design patterns:
-   - Strategy pattern for language parsers
-   - Visitor pattern for AST traversal
-   - Factory pattern for parser creation
-   - Observer pattern for analysis events
-   - Composite pattern for code structures
-   - Singleton pattern for configuration
-
-2. ⏳ Language-specific parser implementations:
-   - C++ parser with Boost.Spirit integration
-   - C# parser implementation
-   - Python parser implementation
-
-3. ⏳ Core analysis logic:
-   - Implementation of analyzer.cpp with strategy pattern
-   - Integration of visitor pattern for AST traversal
-   - Factory pattern integration for parser creation
-
-4. ⏳ Utility components:
-   - File system operations with Boost.Filesystem
-   - String manipulation utilities
-   - Graph operations with Boost.Graph
-
-### Pending Tasks
-1. 📝 Complete implementation of all design patterns in code
-2. 📝 Full parser implementations for all languages
-3. 📝 Integration testing and validation
-4. 📝 Performance optimization and profiling
-5. 📝 Documentation completion with Doxygen examples
-6. 📝 Final testing with sample projects
-
-## Implementation Details
-
-### Core Components
-- **Data Model**: Complete with Class, Method, Variable structures
-- **Analyzer Interface**: Base analyzer class with strategy pattern support
-- **Parser Interfaces**: Language-specific parser interfaces
-- **Visitor Pattern**: AST traversal infrastructure (partial implementation)
-- **Factory Pattern**: Parser creation system (partial implementation)
-
-### Boost Integration Status
-- ✅ Boost.Filesystem for file operations
-- ✅ Boost.System for error handling
-- ✅ Boost.PropertyTree for configuration
-- ⏳ Boost.Spirit for C++ parsing grammar
-- ⏳ Boost.Graph for code relationship visualization
-
-## Next Steps
-1. Complete implementation of design patterns in core components
-2. Implement full parser functionality for C++, C#, and Python
-3. Integrate all components into complete analysis workflow
-4. Add comprehensive test coverage
-5. Perform performance testing and optimization
-6. Generate complete Doxygen documentation
-
-## Version Information
-- **Current Version**: 0.1.0
-- **Target Version**: 1.0.0 (complete implementation)
-- **Status**: Alpha - Core functionality implemented, extensions in progress
-
-## Build Status
-```bash
-# Current build status (assuming all required dependencies are installed)
-mkdir build && cd build
-cmake ..
-make
-```
-
-The project is progressing according to plan with core architecture and design patterns implemented. Parser implementations and full integration testing are the next major milestones.
+## Outstanding
+- Tracked in `progress.md` → "Outstanding": the black-box wiring tests for
+  the call-graph / invert / content-zoom page features (open, this change),
+  and the user-facing documentation-audit pass (in progress, this change).

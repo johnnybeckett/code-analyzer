@@ -613,3 +613,42 @@ TEST(UmlServerTest, ServesPageWithStreamingWiring) {
     srv.stop();
     worker.join();
 }
+
+// Mobile / PC detection: whatever the browser receives must contain both
+// input models — the desktop mouse model and the touch model (gestures plus
+// the on-screen button pad) that activates only on a coarse pointer. The
+// page is built the same way main.cpp builds it, so this asserts what the
+// browser actually gets, not the source template.
+TEST(UmlServerTest, ServesPageWithTouchAndMouseModels) {
+    const std::string body = real_page();
+    ASSERT_FALSE(body.empty());
+
+    server::UmlServer srv(body, {}, 0);
+    const unsigned short port = srv.local_port();
+    ASSERT_NE(port, 0);
+    std::thread worker{[&] { srv.run(); }};
+    ASSERT_TRUE(wait_ready(port));
+
+    const std::string resp = raw_request(port, "GET / HTTP/1.1\r\nHost: x\r\n\r\n");
+    ASSERT_EQ(status_of(resp), 200);
+    const std::string page = body_of(resp);
+
+    // Detection: coarse-pointer sniff, and the flag that reveals the pad.
+    EXPECT_NE(page.find("maxTouchPoints"), std::string::npos);
+    EXPECT_NE(page.find("(pointer: coarse)"), std::string::npos);
+    EXPECT_NE(page.find("body.touch #touchpad { display: block; }"), std::string::npos);
+
+    // Touch gestures and the button pad (move / zoom / nav / center).
+    EXPECT_NE(page.find("'touchmove'"), std::string::npos);
+    EXPECT_NE(page.find("id=\"touchpad\""), std::string::npos);
+    EXPECT_NE(page.find("data-act=\"zoomin\""), std::string::npos);
+    EXPECT_NE(page.find("data-act=\"center\""), std::string::npos);
+    EXPECT_NE(page.find("data-act=\"next\""), std::string::npos);
+
+    // The desktop mouse model survives alongside it.
+    EXPECT_NE(page.find("'mousedown'"), std::string::npos);
+    EXPECT_NE(page.find("if (touchMode) return;"), std::string::npos);
+
+    srv.stop();
+    worker.join();
+}

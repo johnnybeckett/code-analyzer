@@ -53,10 +53,21 @@ This creates the code analyzer (`CodeAnalyzer`) and the UML model server (`UmlSe
 
 ## Visualization Features
 
-1. **3D Navigation**:
-   - Click and drag to rotate the view
-   - Scroll to zoom in/out (Ctrl+drag for fine control)
-   - Right-click and drag to pan
+1. **3D Navigation** — the page detects the browser and picks the model:
+   *Mouse (desktop)*
+   - **Click and drag** rotates the view (orbit; **Alt** for fine control)
+   - **Shift + drag** pans the look-at target
+   - **Ctrl + drag** or **scroll** zooms the camera in/out
+   - **Ctrl + scroll** zooms the content (source pane, diagram, call graph)
+   - **Double-click** a class to focus it; a member's type or an inheritance
+     line jumps to the class at its far end
+   - **Invert horizontal / vertical movement** checkboxes in the panel flip
+     the drag direction per axis
+   *Touch (phones, tablets)*
+   - **One-finger drag** orbits · **two-finger pinch** zooms · **two-finger drag** pans
+   - **Double-tap** a class to focus it
+   - An on-screen **button pad** (bottom of the screen): ‹ / › previous/next
+     class, ↑ ↓ ← → hold to move the view, + / − zoom, ⌖ center the view
 
 2. **Keyboard Navigation**:
    - **n** / **→** next class, **p** / **←** previous class, **c** / **Home** center the view
@@ -66,7 +77,7 @@ This creates the code analyzer (`CodeAnalyzer`) and the UML model server (`UmlSe
 3. **Filtering**:
    - Filter classes by **name** with a regex
    - Filter classes by **namespace** with a second regex (matched against the class namespace)
-   - Both filters apply together; click "Reset Filter" to clear them and show all classes again
+   - Both filters apply together; click "Reset" to clear them and show all classes again
 
 4. **Performance (level of detail)**:
    - Only the classes closest to the camera are drawn (default the **nearest 500**), so a diagram with thousands of classes stays responsive

@@ -16,7 +16,7 @@ S4 Task 3b/3c → S5 Task 2 → S6 Docs + final gate.**
 
 ---
 
-## S1 — `ClassIndex` core (white-box green)
+## S1 — `ClassIndex` core — ✅ done (`608267b`)
 Goal: a testable spatial index with no server/sockets.
 
 1. Create `src/server/class_index.h` + `src/server/class_index.cpp`:
@@ -45,7 +45,7 @@ Goal: a testable spatial index with no server/sockets.
    (size 0, `nearest` → empty).
 4. **Green-check.** Expected: 121 + (new class_index cases) all pass.
 
-## S2 — endpoints + `UmlServer`/`main` wiring (black-box green)
+## S2 — endpoints + `UmlServer`/`main` wiring — ✅ done (`608267b`)
 1. `src/server/rest_handlers.h` — add `IndexHandler` + `NearestHandler` mirroring
    `SourceHandler` (inline ctor taking `const ClassIndex* index_`, `handle`,
    `describe`); forward-declare / include `server/class_index.h`. Extend
@@ -75,7 +75,7 @@ Goal: a testable spatial index with no server/sockets.
      both routes return 501.
 7. **Green-check** — full `ctest` passes (white + black for Task 1 server side).
 
-## S3 — client streaming (`template.h`) + black-box
+## S3 — client streaming (`template.h`) + black-box — ✅ done (`608267b`)
 1. Read only the streaming-relevant regions: `:1198-1200`, `:1458`, `:1475`,
    `:1543-1546`, `:1635-1655`, `:1717-1724`.
 2. Replace the at-load all-box build with a streaming module:
@@ -90,28 +90,28 @@ Goal: a testable spatial index with no server/sockets.
    (`/classes/index`, `/classes/near`) and the materialize/dispose + grid-cache
    wiring. **Green-check.**
 
-## S4 — call-graph view + Ctrl+wheel zoom (black-box)
-1. `template.h`: add a whole-project call-graph view (toolbar toggle/tab):
-   method nodes + directed edges from `called_methods`; resolve edges by name —
-   prefer same-class target, then global, flag ambiguity. Reuse existing
-   theme / render helpers; scale-invariant for clean Ctrl+wheel zoom.
-2. `template.h:1721-1724` wheel handler: `if (e.ctrlKey) { adjust shared
-   contentZoom; e.preventDefault(); return; }` — else existing `view.dist`
-   zoom. Apply `contentZoom` to source pane + rendered diagrams + call-graph
-   (CSS transform / font-size).
+## S4 — call-graph view + Ctrl+wheel zoom — ✅ implementation done (`b17ca44`); step 3 (black-box) still open (this change)
+1. ✅ (`b17ca44`) `template.h`: whole-project call-graph view (toolbar
+   `callgraphBtn`, `template.h:727`) with directed edges from
+   `called_methods`.
+2. ✅ (`b17ca44`) wheel handler (`template.h:1997-2000`; `contentZoom` state
+   at `:1721`): `if (e.ctrlKey) { adjust shared contentZoom }` with
+   `preventDefault`, applied via the `--cz` CSS variable to source pane +
+   rendered diagrams + call-graph — else existing `view.dist` zoom.
 3. Black-box: served page contains the call-graph wiring **and** the
    `e.ctrlKey` zoom branch. **Green-check.**
 
-## S5 — invert horizontal / vertical toggles (black-box)
-1. `template.h`: two independent toolbar checkboxes ("Invert horizontal" /
-   "Invert vertical"), state in the existing view/config object.
-2. Orbit handler `template.h:1717-1718`:
+## S5 — invert horizontal / vertical toggles — ✅ implementation done (`b17ca44`); step 3 (black-box) still open (this change)
+1. ✅ (`b17ca44`) `template.h`: two independent toolbar checkboxes
+   (`invertH`/`invertV`, `template.h:768-771`), state in the view object
+   (`:1722-1723`).
+2. ✅ (`b17ca44`) Orbit handler (`template.h:1989-1990`):
    `view.yaw += dx * (invertH ? -1 : 1) * 0.005 * fine;`
    `view.pitch = clamp(view.pitch + dy * (invertV ? -1 : 1) * 0.005 * fine, -1.4, 1.4);`
 3. Black-box: served page contains both toggle controls **and** the two
    sign-multiplier sites. **Green-check.**
 
-## S6 — Docs + final full gate
+## S6 — Docs + final full gate — 🔄 in progress (this change)
 1. Update `README.uml.md`, `README.server.md`, `PROJECT_DIAGRAM.md`: new
    `/classes` endpoints, call-graph view, invert toggles, Ctrl+wheel zoom,
    streaming/grid-caching model; point at `AGENTS.md`.
@@ -127,9 +127,11 @@ Goal: a testable spatial index with no server/sockets.
   → `const std::string*`.
 - `SourceHandler` is the mirror template (inline ctor + `private:` pointer
   member). `register_domain_handlers` body at `rest_handlers.cpp:247-256`.
-- `UmlServer` ctor: `(body, sources, port, review=nullptr, title={})`; members
-  ordered `body_ sources_ review_ title_ io_ acceptor_ assigned_port_ router_`
-  (Router destroyed first — a new index member must sit **before `io_`**).
+- `UmlServer` ctor: `(body, sources, port, review=nullptr, title={},
+  classIndex=nullptr)` (the 6th arg landed in `608267b`); members ordered
+  `body_ sources_ review_ title_ classIndex_ io_ acceptor_ assigned_port_
+  router_` (Router destroyed first — `classIndex_` sits before `io_` so no
+  handler outlives state; `uml_server.h:105-120`).
 - `JsonClassLoader` statics (`class_loader.h`): `parseFileClassesStrict`,
   `parseFileSources`, `getClassesJSON`, `parseCmakeMerged`, … each vector
   element is one class object's serialized JSON → the reuse point for
