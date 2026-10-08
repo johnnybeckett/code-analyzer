@@ -4164,37 +4164,6 @@ inline constexpr std::string_view kTemplate = R"HTMLDOC(<!DOCTYPE html>
                 document.body.style.cursor = '';
             }
         });
-
-        // --- Drag the sidebar resize handle to resize the sidebar ------
-        let sidebarResizing = false;
-        const sidebar = document.getElementById('sidebar');
-        const sidebarResizeHandle = document.createElement('div');
-        sidebarResizeHandle.id = 'sidebar-resize-handle';
-        sidebar.appendChild(sidebarResizeHandle);
-
-        sidebarResizeHandle.addEventListener('mousedown', e => {
-            e.preventDefault();
-            sidebarResizing = true;
-            document.body.style.userSelect = 'none';
-            document.body.style.cursor = 'col-resize';
-        });
-
-        document.addEventListener('mousemove', e => {
-            if (sidebarResizing) {
-                const newWidth = window.innerWidth - e.clientX;
-                // Clamp to reasonable values: 200px minimum, 80% maximum of window width
-                const clampedWidth = Math.max(200, Math.min(newWidth, window.innerWidth * 0.8));
-                sidebar.style.width = clampedWidth + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (sidebarResizing) {
-                sidebarResizing = false;
-                document.body.style.userSelect = '';
-                document.body.style.cursor = '';
-            }
-        });
         window.addEventListener('mousemove', e => {
             if (!paneDragging) return;
             const h = window.innerHeight;
