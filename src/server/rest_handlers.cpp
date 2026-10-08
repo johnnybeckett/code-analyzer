@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
@@ -178,43 +179,53 @@ RestEndpoint NearestHandler::describe() const {
 }
 
 RestResponse RenderHandler::handle(const Request& req) const {
-    std::string path;
-    if (const std::string* raw = first_query(req, "path")) {
-        path = percent_decode(*raw);
-    }
-
-    if (sources_ && !path.empty()) {
-        const auto it = sources_->find(path);
-        if (it != sources_->end()) {
-            std::string bin, cmd;
-            if (ends_with_ci(path, ".dot")) {
-                bin = "dot";
-                cmd = "dot -Tsvg";
-            } else if (ends_with_ci(path, ".drawio") || ends_with_ci(path, ".draw.io")) {
-                bin = "drawio";
-                cmd = "drawio -x -f svg";
-            } else {
-                return json_error(400, "unsupported format for rendering: " + path);
-            }
-
-            if (!renderer_available(bin)) {
-                return json_error(503, "renderer '" + bin + "' not available on this host");
-            }
-
-            const std::optional<std::string> svg = run_renderer(cmd, it->second);
-            if (!svg) {
-                return json_error(502, "renderer '" + bin + "' failed to produce output");
-            }
-
-            RestResponse r;
-            r.status = 200;
-            r.content_type = "image/svg+xml; charset=utf-8";
-            r.body = std::move(*svg);
-            return r;
+    try {
+        std::string path;
+        if (const std::string* raw = first_query(req, "path")) {
+            path = percent_decode(*raw);
         }
-    }
 
-    return json_error(404, "no such source");
+        if (sources_ && !path.empty()) {
+            const auto it = sources_->find(path);
+            if (it != sources_->end()) {
+                std::string bin, cmd;
+                if (ends_with_ci(path, ".dot")) {
+                    bin = "dot";
+                    cmd = "dot -Tsvg";
+                } else if (ends_with_ci(path, ".drawio") || ends_with_ci(path, ".draw.io")) {
+                    bin = "drawio";
+                    cmd = "drawio -x -f svg";
+                } else {
+                    return json_error(400, "unsupported format for rendering: " + path);
+                }
+
+                if (!renderer_available(bin)) {
+                    return json_error(503, "renderer '" + bin + "' not available on this host");
+                }
+
+                const std::optional<std::string> svg = run_renderer(cmd, it->second);
+                if (!svg) {
+                    return json_error(502, "renderer '" + bin + "' failed to produce output");
+                }
+
+                RestResponse r;
+                r.status = 200;
+                r.content_type = "image/svg+xml; charset=utf-8";
+                r.body = std::move(*svg);
+                return r;
+            }
+        }
+
+        return json_error(404, "no such source");
+    } catch (const std::exception& e) {
+        // Log the error and return a generic server error
+        std::cerr << "RenderHandler: exception occurred during rendering: " << e.what() << "\n";
+        return json_error(500, "internal server error during rendering");
+    } catch (...) {
+        // Catch any other unhandled exceptions
+        std::cerr << "RenderHandler: unknown exception occurred during rendering\n";
+        return json_error(500, "internal server error during rendering");
+    }
 }
 
 RestEndpoint RenderHandler::describe() const {
@@ -244,80 +255,90 @@ RestEndpoint CommentsGetHandler::describe() const {
 }
 
 RestResponse CommentsPostHandler::handle(const Request& req) const {
-    if (!review_) {
-        return json_error(400, "review comments are not enabled for this server");
-    }
-
-    json::value parsed;
     try {
-        parsed = json::parse(req.body);
-    } catch (const std::exception&) {
-        return json_error(400, "body must be a JSON object");
-    }
-    if (!parsed.is_object()) {
-        return json_error(400, "body must be a JSON object");
-    }
-    const auto& obj = parsed.as_object();
-
-    // text: required string, non-blank after trim.
-    const auto text_it = obj.find("text");
-    if (text_it == obj.end() || !text_it->value().is_string()) {
-        return json_error(400, "'text' must be a non-empty string");
-    }
-    // Direct-initialize (parens), not copy-init: as_string() yields
-    // boost::json::string, which only converts to std::string_view, so
-    // `const std::string text = ...as_string()` would be an invalid
-    // two-step user conversion.
-    const std::string text(text_it->value().as_string());
-    if (blank(text)) {
-        return json_error(400, "'text' must be non-empty");
-    }
-
-    // oldLine/newLine: optional integers >= 0; at least one must be positive.
-    long long old_line = 0, new_line = 0;
-    if (const auto o = obj.find("oldLine"); o != obj.end()) {
-        if (!o->value().is_int64() || o->value().as_int64() < 0) {
-            return json_error(400, "'oldLine' must be an integer >= 0");
+        if (!review_) {
+            return json_error(400, "review comments are not enabled for this server");
         }
-        old_line = o->value().as_int64();
-    }
-    if (const auto n = obj.find("newLine"); n != obj.end()) {
-        if (!n->value().is_int64() || n->value().as_int64() < 0) {
-            return json_error(400, "'newLine' must be an integer >= 0");
+
+        json::value parsed;
+        try {
+            parsed = json::parse(req.body);
+        } catch (const std::exception&) {
+            return json_error(400, "body must be a JSON object");
         }
-        new_line = n->value().as_int64();
-    }
-    if (old_line == 0 && new_line == 0) {
-        return json_error(400, "at least one of oldLine/newLine must be positive");
-    }
+        if (!parsed.is_object()) {
+            return json_error(400, "body must be a JSON object");
+        }
+        const auto& obj = parsed.as_object();
 
-    std::string file;
-    if (const auto f = obj.find("file"); f != obj.end() && f->value().is_string()) {
-        file = f->value().as_string();
-    }
+        // text: required string, non-blank after trim.
+        const auto text_it = obj.find("text");
+        if (text_it == obj.end() || !text_it->value().is_string()) {
+            return json_error(400, "'text' must be a non-empty string");
+        }
+        // Direct-initialize (parens), not copy-init: as_string() yields
+        // boost::json::string, which only converts to std::string_view, so
+        // `const std::string text = ...as_string()` would be an invalid
+        // two-step user conversion.
+        const std::string text(text_it->value().as_string());
+        if (blank(text)) {
+            return json_error(400, "'text' must be non-empty");
+        }
 
-    ReviewComment comment;
-    comment.file = std::move(file);
-    comment.old_line = old_line;
-    comment.new_line = new_line;
-    comment.text = std::move(text);
+        // oldLine/newLine: optional integers >= 0; at least one must be positive.
+        long long old_line = 0, new_line = 0;
+        if (const auto o = obj.find("oldLine"); o != obj.end()) {
+            if (!o->value().is_int64() || o->value().as_int64() < 0) {
+                return json_error(400, "'oldLine' must be an integer >= 0");
+            }
+            old_line = o->value().as_int64();
+        }
+        if (const auto n = obj.find("newLine"); n != obj.end()) {
+            if (!n->value().is_int64() || n->value().as_int64() < 0) {
+                return json_error(400, "'newLine' must be an integer >= 0");
+            }
+            new_line = n->value().as_int64();
+        }
+        if (old_line == 0 && new_line == 0) {
+            return json_error(400, "at least one of oldLine/newLine must be positive");
+        }
 
-    try {
-        const ReviewComment stored = review_->add(std::move(comment));
-        json::object out;
-        out["id"] = stored.id;
-        out["file"] = stored.file;
-        out["oldLine"] = static_cast<std::int64_t>(stored.old_line);
-        out["newLine"] = static_cast<std::int64_t>(stored.new_line);
-        out["text"] = stored.text;
-        out["created"] = stored.created;
-        RestResponse r;
-        r.status = 201;
-        r.content_type = "application/json; charset=utf-8";
-        r.body = json::serialize(out);
-        return r;
+        std::string file;
+        if (const auto f = obj.find("file"); f != obj.end() && f->value().is_string()) {
+            file = f->value().as_string();
+        }
+
+        ReviewComment comment;
+        comment.file = std::move(file);
+        comment.old_line = old_line;
+        comment.new_line = new_line;
+        comment.text = std::move(text);
+
+        try {
+            const ReviewComment stored = review_->add(std::move(comment));
+            json::object out;
+            out["id"] = stored.id;
+            out["file"] = stored.file;
+            out["oldLine"] = static_cast<std::int64_t>(stored.old_line);
+            out["newLine"] = static_cast<std::int64_t>(stored.new_line);
+            out["text"] = stored.text;
+            out["created"] = stored.created;
+            RestResponse r;
+            r.status = 201;
+            r.content_type = "application/json; charset=utf-8";
+            r.body = json::serialize(out);
+            return r;
+        } catch (const std::exception& e) {
+            return json_error(500, std::string("failed to store comment: ") + e.what());
+        }
     } catch (const std::exception& e) {
-        return json_error(500, std::string("failed to store comment: ") + e.what());
+        // Log the error and return a generic server error
+        std::cerr << "CommentsPostHandler: exception occurred during comment processing: " << e.what() << "\n";
+        return json_error(500, "internal server error during comment processing");
+    } catch (...) {
+        // Catch any other unhandled exceptions
+        std::cerr << "CommentsPostHandler: unknown exception occurred during comment processing\n";
+        return json_error(500, "internal server error during comment processing");
     }
 }
 

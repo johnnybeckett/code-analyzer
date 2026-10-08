@@ -18,65 +18,83 @@ Analyzer::Analyzer(const Config& config, const ParserRegistry& registry,
     : config_(config), registry_(registry), dispatcher_(dispatcher) {}
 
 AnalysisResult Analyzer::analyze(const SourceFileProvider& provider) {
-    AnalysisResult result;
+    try {
+        AnalysisResult result;
 
-    std::cout << provider.banner() << std::endl;
+        std::cout << provider.banner() << std::endl;
 
-    // Materialize the file list once so the pool and the builder agree on the
-    // same order. Parsing is parallel (the reactor's workers); folding is not:
-    // this thread is the single builder, and it is the only place events are
-    // emitted, so EventDispatcher/observers stay single-threaded and see a
-    // deterministic, in-order stream.
-    const std::vector<std::string> files = provider.files();
-    const std::size_t n = files.size();
+        // Materialize the file list once so the pool and the builder agree on the
+        // same order. Parsing is parallel (the reactor's workers); folding is not:
+        // this thread is the single builder, and it is the only place events are
+        // emitted, so EventDispatcher/observers stay single-threaded and see a
+        // deterministic, in-order stream.
+        const std::vector<std::string> files = provider.files();
+        const std::size_t n = files.size();
 
-    if (n > 0) {
-        // The builder: the single writer. It emits each file's progress event
-        // and folds its classes into the shared result; a failed file is
-        // reported (and skipped) exactly as the old serial loop did.
-        auto builder = [this, &result](ParseOutcome out) {
-            emit(AnalysisEvent{AnalysisEvent::Kind::FileParsed, out.file, 0});
-            if (out.ok) {
-                for (auto& parsed_class : out.classes) {
-                    result.add_class(std::move(parsed_class));
+        if (n > 0) {
+            // The builder: the single writer. It emits each file's progress event
+            // and folds its classes into the shared result; a failed file is
+            // reported (and skipped) exactly as the old serial loop did.
+            auto builder = [this, &result](ParseOutcome out) {
+                emit(AnalysisEvent{AnalysisEvent::Kind::FileParsed, out.file, 0});
+                if (out.ok) {
+                    for (auto& parsed_class : out.classes) {
+                        result.add_class(std::move(parsed_class));
+                    }
+                    return;
                 }
-                return;
-            }
-            // A single unreadable/malformed file must not abort the run.
-            try {
-                if (out.error) {
-                    std::rethrow_exception(out.error);
+                // A single unreadable/malformed file must not abort the run.
+                try {
+                    if (out.error) {
+                        std::rethrow_exception(out.error);
+                    }
+                    throw std::runtime_error("unknown parse error");
+                } catch (const std::exception& e) {
+                    std::cerr << "Warning: skipping file " << out.file
+                              << " (" << e.what() << ")" << std::endl;
+                } catch (...) {
+                    std::cerr << "Warning: skipping file " << out.file
+                              << " (unknown error)" << std::endl;
                 }
-                throw std::runtime_error("unknown parse error");
-            } catch (const std::exception& e) {
-                std::cerr << "Warning: skipping file " << out.file
-                          << " (" << e.what() << ")" << std::endl;
-            } catch (...) {
-                std::cerr << "Warning: skipping file " << out.file
-                          << " (unknown error)" << std::endl;
-            }
-        };
+            };
 
-        // Size the pool to the machine, capped so a huge tree doesn't oversub-
-        // scribe, and never larger than the work.
-        const std::size_t hw = std::thread::hardware_concurrency();
-        std::size_t workers = std::min<std::size_t>(n, (hw > 0 ? hw : 1));
-        workers = std::min<std::size_t>(workers, 32);
-        if (workers < 1) {
-            workers = 1;
+            // Size the pool to the machine, capped so a huge tree doesn't oversub-
+            // scribe, and never larger than the work.
+            const std::size_t hw = std::thread::hardware_concurrency();
+            std::size_t workers = std::min<std::size_t>(n, (hw > 0 ? hw : 1));
+            workers = std::min<std::size_t>(workers, 32);
+            if (workers < 1) {
+                workers = 1;
+            }
+
+            AnalysisReactor reactor(registry_, static_cast<unsigned>(workers),
+                                    std::move(builder));
+            reactor.run(files);
         }
 
-        AnalysisReactor reactor(registry_, static_cast<unsigned>(workers),
-                                std::move(builder));
-        reactor.run(files);
+        AnalysisEvent complete;
+        complete.kind = AnalysisEvent::Kind::AnalysisComplete;
+        complete.class_count = result.classes.size();
+        emit(complete);
+
+        return result;
+    } catch (const std::exception& e) {
+        std::cerr << "Error during analysis: " << e.what() << "\n";
+        // Return empty result in case of error
+        AnalysisEvent complete;
+        complete.kind = AnalysisEvent::Kind::AnalysisComplete;
+        complete.class_count = 0;
+        emit(complete);
+        return AnalysisResult{};
+    } catch (...) {
+        std::cerr << "Unknown error during analysis\n";
+        // Return empty result in case of unknown error
+        AnalysisEvent complete;
+        complete.kind = AnalysisEvent::Kind::AnalysisComplete;
+        complete.class_count = 0;
+        emit(complete);
+        return AnalysisResult{};
     }
-
-    AnalysisEvent complete;
-    complete.kind = AnalysisEvent::Kind::AnalysisComplete;
-    complete.class_count = result.classes.size();
-    emit(complete);
-
-    return result;
 }
 
 AnalysisResult Analyzer::analyze_project(const std::string& project_path) {

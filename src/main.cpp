@@ -66,61 +66,61 @@ void print_usage(const std::string& program_name) {
  * @return Exit status
  */
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Error: No input specified\n";
-        print_usage(argv[0]);
-        return 1;
-    }
-
-    std::string input_path = argv[argc - 1];
-    bool use_compile_commands = false;
-    bool use_commit = false;
-    std::string staging_dir;
-    std::string json_output;
-    std::string config_path;
-
-    // Parse command line arguments. The last argument is pre-seeded above as
-    // the positional input path, so it is scanned here too: a trailing -h or
-    // --help must still trigger the help path. Option flags landing at the
-    // final position simply fail their i + 1 < argc guard and fall through.
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--compile-commands" && i + 1 < argc) {
-            input_path = argv[++i];
-            use_compile_commands = true;
-            use_commit = false;
-        } else if (arg == "--directory" && i + 1 < argc) {
-            input_path = argv[++i];
-            use_compile_commands = false;
-            use_commit = false;
-        } else if (arg == "--commit" && i + 1 < argc) {
-            input_path = argv[++i];
-            use_commit = true;
-            use_compile_commands = false;
-        } else if (arg == "--staging" && i + 1 < argc) {
-            staging_dir = argv[++i];
-        } else if (arg == "--json" && i + 1 < argc) {
-            json_output = argv[++i];
-        } else if (arg == "--config" && i + 1 < argc) {
-            config_path = argv[++i];
-        } else if (arg == "-h" || arg == "--help") {
+    try {
+        if (argc < 2) {
+            std::cerr << "Error: No input specified\n";
             print_usage(argv[0]);
-            return 0;
-        }
-    }
-
-    // Options: an explicit --config file wins; otherwise the built-in defaults
-    Config config;
-    if (!config_path.empty()) {
-        auto loaded = Config::load(config_path);
-        if (!loaded) {
-            std::cerr << "Error: could not load configuration from " << config_path << "\n";
             return 1;
         }
-        config = std::move(*loaded);
-    }
 
-    try {
+        std::string input_path = argv[argc - 1];
+        bool use_compile_commands = false;
+        bool use_commit = false;
+        std::string staging_dir;
+        std::string json_output;
+        std::string config_path;
+
+        // Parse command line arguments. The last argument is pre-seeded above as
+        // the positional input path, so it is scanned here too: a trailing -h or
+        // --help must still trigger the help path. Option flags landing at the
+        // final position simply fail their i + 1 < argc guard and fall through.
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg == "--compile-commands" && i + 1 < argc) {
+                input_path = argv[++i];
+                use_compile_commands = true;
+                use_commit = false;
+            } else if (arg == "--directory" && i + 1 < argc) {
+                input_path = argv[++i];
+                use_compile_commands = false;
+                use_commit = false;
+            } else if (arg == "--commit" && i + 1 < argc) {
+                input_path = argv[++i];
+                use_commit = true;
+                use_compile_commands = false;
+            } else if (arg == "--staging" && i + 1 < argc) {
+                staging_dir = argv[++i];
+            } else if (arg == "--json" && i + 1 < argc) {
+                json_output = argv[++i];
+            } else if (arg == "--config" && i + 1 < argc) {
+                config_path = argv[++i];
+            } else if (arg == "-h" || arg == "--help") {
+                print_usage(argv[0]);
+                return 0;
+            }
+        }
+
+        // Options: an explicit --config file wins; otherwise the built-in defaults
+        Config config;
+        if (!config_path.empty()) {
+            auto loaded = Config::load(config_path);
+            if (!loaded) {
+                std::cerr << "Error: could not load configuration from " << config_path << "\n";
+                return 1;
+            }
+            config = std::move(*loaded);
+        }
+
         // Composition root: assemble the parser registry (which extension is
         // parsed by which language, per config), the provider registry (which
         // input mode supplies the file list), the observer pipeline (what
@@ -189,6 +189,9 @@ int main(int argc, char* argv[]) {
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Error during analysis: " << e.what() << "\n";
+        return 1;
+    } catch (...) {
+        std::cerr << "Error: Unknown exception occurred during analysis\n";
         return 1;
     }
 }

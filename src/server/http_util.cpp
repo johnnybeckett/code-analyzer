@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <iostream>
 #include <map>
 #include <optional>
 #include <sstream>
@@ -31,46 +32,66 @@ int hex_val(char c) {
 }  // namespace
 
 std::string percent_decode(const std::string& in) {
-    std::string out;
-    out.reserve(in.size());
-    for (std::size_t i = 0; i < in.size(); ++i) {
-        const char c = in[i];
-        if (c == '%' && i + 2 < in.size()) {
-            const int hi = hex_val(in[i + 1]);
-            const int lo = hex_val(in[i + 2]);
-            if (hi >= 0 && lo >= 0) {
-                out.push_back(static_cast<char>((hi << 4) | lo));
-                i += 2;
-                continue;
+    try {
+        std::string out;
+        out.reserve(in.size());
+        for (std::size_t i = 0; i < in.size(); ++i) {
+            const char c = in[i];
+            if (c == '%' && i + 2 < in.size()) {
+                const int hi = hex_val(in[i + 1]);
+                const int lo = hex_val(in[i + 2]);
+                if (hi >= 0 && lo >= 0) {
+                    out.push_back(static_cast<char>((hi << 4) | lo));
+                    i += 2;
+                    continue;
+                }
             }
+            out.push_back(c);
         }
-        out.push_back(c);
+        return out;
+    } catch (const std::exception& e) {
+        // Log the error but return empty string to be safe
+        std::cerr << "percent_decode: exception occurred during decoding: " << e.what() << "\n";
+        return {};
+    } catch (...) {
+        // Catch any other unhandled exceptions
+        std::cerr << "percent_decode: unknown exception occurred during decoding\n";
+        return {};
     }
-    return out;
 }
 
 std::vector<std::pair<std::string, std::string>> parse_query(const std::string& query) {
-    std::vector<std::pair<std::string, std::string>> out;
-    std::size_t start = 0;
-    while (start < query.size()) {
-        const std::size_t amp = query.find('&', start);
-        const std::size_t end = (amp == std::string::npos) ? query.size() : amp;
+    try {
+        std::vector<std::pair<std::string, std::string>> out;
+        std::size_t start = 0;
+        while (start < query.size()) {
+            const std::size_t amp = query.find('&', start);
+            const std::size_t end = (amp == std::string::npos) ? query.size() : amp;
 
-        const std::size_t eq = query.find('=', start);
-        if (eq == std::string::npos || eq > end) {
-            // No '=' in this segment: a bare key with an empty value.
-            out.emplace_back(query.substr(start, end - start), std::string{});
-        } else {
-            out.emplace_back(query.substr(start, eq - start),
-                             query.substr(eq + 1, end - (eq + 1)));
-        }
+            const std::size_t eq = query.find('=', start);
+            if (eq == std::string::npos || eq > end) {
+                // No '=' in this segment: a bare key with an empty value.
+                out.emplace_back(query.substr(start, end - start), std::string{});
+            } else {
+                out.emplace_back(query.substr(start, eq - start),
+                                 query.substr(eq + 1, end - (eq + 1)));
+            }
 
-        if (amp == std::string::npos) {
-            break;
+            if (amp == std::string::npos) {
+                break;
+            }
+            start = amp + 1;
         }
-        start = amp + 1;
+        return out;
+    } catch (const std::exception& e) {
+        // Log the error but return empty vector to be safe
+        std::cerr << "parse_query: exception occurred during query parsing: " << e.what() << "\n";
+        return {};
+    } catch (...) {
+        // Catch any other unhandled exceptions
+        std::cerr << "parse_query: unknown exception occurred during query parsing\n";
+        return {};
     }
-    return out;
 }
 
 std::string first_query(const std::string& query, const std::string& name) {
@@ -238,43 +259,65 @@ bool ends_with_ci(const std::string& path, const char* suffix) {
 }
 
 bool renderer_available(const std::string& bin) {
-    if (std::FILE* p = popen(("command -v " + bin + " >/dev/null 2>&1").c_str(), "r")) {
-        return pclose(p) == 0;
+    try {
+        if (std::FILE* p = popen(("command -v " + bin + " >/dev/null 2>&1").c_str(), "r")) {
+            return pclose(p) == 0;
+        }
+        return false;
+    } catch (const std::exception& e) {
+        // Log the error but return false to be safe
+        std::cerr << "renderer_available: exception occurred checking for renderer '"
+                  << bin << "': " << e.what() << "\n";
+        return false;
+    } catch (...) {
+        // Catch any other unhandled exceptions
+        std::cerr << "renderer_available: unknown exception occurred checking for renderer '"
+                  << bin << "'\n";
+        return false;
     }
-    return false;
 }
 
 std::optional<std::string> run_renderer(const std::string& cmd, const std::string& source) {
-    char tmpl[] = "/tmp/uml-render-XXXXXX";
-    const int fd = mkstemps(tmpl, 0);
-    if (fd < 0) {
-        return std::nullopt;
-    }
-    const std::string tmp = tmpl;
-    if (source.size() != 0 &&
-        (write(fd, source.data(), source.size()) != static_cast<ssize_t>(source.size()) ||
-         fsync(fd) != 0)) {
+    try {
+        char tmpl[] = "/tmp/uml-render-XXXXXX";
+        const int fd = mkstemps(tmpl, 0);
+        if (fd < 0) {
+            return std::nullopt;
+        }
+        const std::string tmp = tmpl;
+        if (source.size() != 0 &&
+            (write(fd, source.data(), source.size()) != static_cast<ssize_t>(source.size()) ||
+             fsync(fd) != 0)) {
+            ::close(fd);
+            std::remove(tmp.c_str());
+            return std::nullopt;
+        }
         ::close(fd);
+
+        std::optional<std::string> svg;
+        if (std::FILE* p = popen((cmd + " '" + tmp + "'").c_str(), "r")) {
+            std::string out;
+            char buf[8192];
+            std::size_t got = 0;
+            while ((got = std::fread(buf, 1, sizeof buf, p)) > 0) {
+                out.append(buf, got);
+            }
+            const int st = pclose(p);
+            if (st == 0 && !out.empty()) {
+                svg = std::move(out);
+            }
+        }
         std::remove(tmp.c_str());
+        return svg;
+    } catch (const std::exception& e) {
+        // Log the error and return nullopt
+        std::cerr << "run_renderer: exception occurred during rendering: " << e.what() << "\n";
+        return std::nullopt;
+    } catch (...) {
+        // Catch any other unhandled exceptions
+        std::cerr << "run_renderer: unknown exception occurred during rendering\n";
         return std::nullopt;
     }
-    ::close(fd);
-
-    std::optional<std::string> svg;
-    if (std::FILE* p = popen((cmd + " '" + tmp + "'").c_str(), "r")) {
-        std::string out;
-        char buf[8192];
-        std::size_t got = 0;
-        while ((got = std::fread(buf, 1, sizeof buf, p)) > 0) {
-            out.append(buf, got);
-        }
-        const int st = pclose(p);
-        if (st == 0 && !out.empty()) {
-            svg = std::move(out);
-        }
-    }
-    std::remove(tmp.c_str());
-    return svg;
 }
 
 }  // namespace server

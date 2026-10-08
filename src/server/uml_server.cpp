@@ -49,6 +49,10 @@ private:
             do_write();
             return;
         }
+        // Log the error but continue to close connection
+        if (ec != boost::asio::error::eof && ec != boost::beast::errc::connection_reset) {
+            std::cerr << "UmlServer: read failed: " << ec.message() << "\n";
+        }
         do_close();
     }
 
@@ -89,32 +93,46 @@ private:
         res_.version(req_.version());
         res_.set(http::field::server, "umlsrv");
 
-        // Convert the wire request into the normalized form handlers take:
-        // (path, raw query pairs, body) — the "endpoint and variables".
-        Request req;
-        req.path = request_path();
-        req.query = parse_query(raw_query());
-        req.body = req_.body();
+        try {
+            // Convert the wire request into the normalized form handlers take:
+            // (path, raw query pairs, body) — the "endpoint and variables".
+            Request req;
+            req.path = request_path();
+            req.query = parse_query(raw_query());
+            req.body = req_.body();
 
-        const std::string verb = verb_name(req_.method());
-        if (const auto handler = router_->route(verb, req.path)) {
-            const RestResponse r = handler->handle(req);
-            res_.result(static_cast<http::status>(r.status));
-            res_.set(http::field::content_type, r.content_type);
-            if (r.content_disposition) {
-                res_.set(http::field::content_disposition, *r.content_disposition);
+            const std::string verb = verb_name(req_.method());
+            if (const auto handler = router_->route(verb, req.path)) {
+                const RestResponse r = handler->handle(req);
+                res_.result(static_cast<http::status>(r.status));
+                res_.set(http::field::content_type, r.content_type);
+                if (r.content_disposition) {
+                    res_.set(http::field::content_disposition, *r.content_disposition);
+                }
+                res_.body() = r.body;
+            } else if (verb == "GET") {
+                // Unmatched GET: the spliced viewer page.
+                res_.result(http::status::ok);
+                res_.set(http::field::content_type, "text/html; charset=utf-8");
+                res_.body() = body_;
+            } else {
+                // A verb/path no handler registered (HEAD and every other verb).
+                res_.result(http::status::method_not_allowed);
+                res_.set(http::field::content_type, "text/plain; charset=utf-8");
+                res_.body() = "Method not allowed: use GET.\n";
             }
-            res_.body() = r.body;
-        } else if (verb == "GET") {
-            // Unmatched GET: the spliced viewer page.
-            res_.result(http::status::ok);
-            res_.set(http::field::content_type, "text/html; charset=utf-8");
-            res_.body() = body_;
-        } else {
-            // A verb/path no handler registered (HEAD and every other verb).
-            res_.result(http::status::method_not_allowed);
+        } catch (const std::exception& e) {
+            // Catch any exceptions in handler processing and return a generic error
+            std::cerr << "UmlServer: exception in handler: " << e.what() << "\n";
+            res_.result(http::status::internal_server_error);
             res_.set(http::field::content_type, "text/plain; charset=utf-8");
-            res_.body() = "Method not allowed: use GET.\n";
+            res_.body() = "Internal server error\n";
+        } catch (...) {
+            // Catch any other unhandled exceptions
+            std::cerr << "UmlServer: unknown exception in handler\n";
+            res_.result(http::status::internal_server_error);
+            res_.set(http::field::content_type, "text/plain; charset=utf-8");
+            res_.body() = "Internal server error\n";
         }
 
         res_.keep_alive(false);  // Connection: close
@@ -157,29 +175,47 @@ UmlServer::UmlServer(std::string body,
                      std::shared_ptr<const ClassIndex> classIndex)
     : body_(std::move(body)), sources_(std::move(sources)), review_(std::move(review)),
       title_(std::move(title)), classIndex_(std::move(classIndex)), acceptor_(io_) {
-    tcp::endpoint endpoint(tcp::v4(), port);
-    acceptor_.open(endpoint.protocol());
-    acceptor_.set_option(net::socket_base::reuse_address(true));
-    acceptor_.bind(endpoint);
-    acceptor_.listen();
-    assigned_port_ = acceptor_.local_endpoint().port();
+    try {
+        tcp::endpoint endpoint(tcp::v4(), port);
+        acceptor_.open(endpoint.protocol());
+        acceptor_.set_option(net::socket_base::reuse_address(true));
+        acceptor_.bind(endpoint);
+        acceptor_.listen();
+        assigned_port_ = acceptor_.local_endpoint().port();
 
-    // The plugin registry: every endpoint registers itself (verb, path) here,
-    // holding references to the shared state above. The domain endpoints come
-    // first; then the two meta endpoints (GET /openapi.json, GET /api), which
-    // point back at this same router so they document the full API — themselves
-    // included. The router is destroyed before the state it holds pointers to
-    // (see the member-order note in the header), so no handler outlives state.
-    register_domain_handlers(router_, sources_, review_, title_, classIndex_.get());
-    register_meta_handlers(router_, title_);
+        // The plugin registry: every endpoint registers itself (verb, path) here,
+        // holding references to the shared state above. The domain endpoints come
+        // first; then the two meta endpoints (GET /openapi.json, GET /api), which
+        // point back at this same router so they document the full API — themselves
+        // included. The router is destroyed before the state it holds pointers to
+        // (see the member-order note in the header), so no handler outlives state.
+        register_domain_handlers(router_, sources_, review_, title_, classIndex_.get());
+        register_meta_handlers(router_, title_);
+    } catch (const std::exception& e) {
+        std::cerr << "UmlServer: failed to initialize server on port " << port
+                  << ": " << e.what() << "\n";
+        throw; // Re-throw so caller can handle it appropriately
+    } catch (...) {
+        std::cerr << "UmlServer: failed to initialize server on port " << port
+                  << ": unknown error\n";
+        throw;
+    }
 }
 
 UmlServer::~UmlServer() = default;
 
 bool UmlServer::run() {
-    do_accept();
-    io_.run();
-    return true;
+    try {
+        do_accept();
+        io_.run();
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "UmlServer: runtime error in server run: " << e.what() << "\n";
+        return false;
+    } catch (...) {
+        std::cerr << "UmlServer: unknown runtime error in server run\n";
+        return false;
+    }
 }
 
 void UmlServer::stop() {

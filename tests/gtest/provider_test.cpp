@@ -9,7 +9,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -364,4 +366,52 @@ TEST(AnalyzerTest, CommitPathMatchesDirectoryPath) {
     EXPECT_EQ(via_commit.classes.size(), 2u);
     EXPECT_EQ(names(via_commit), names(via_directory));
     EXPECT_EQ(names(via_commit), (std::set<std::string>{"AppMain", "SubWidget"}));
+}
+
+// --- Analyzer::analyze failure path --------------------------------------
+
+namespace {
+
+// A provider whose files() throws: exercises the outer catch in analyze(),
+// which must contain the failure, still emit AnalysisComplete, and hand back
+// an empty result instead of unwinding into the caller.
+class ThrowingProvider final : public SourceFileProvider {
+public:
+    std::vector<std::string> files() const override {
+        throw std::runtime_error("provider blew up");
+    }
+    std::string banner() const override { return "throwing provider"; }
+};
+
+// An observer that records events into a caller-owned sink so the test can
+// assert on what analyze() emitted after the failure.
+class RecordingObserver final : public AnalysisObserver {
+public:
+    explicit RecordingObserver(std::vector<AnalysisEvent>& sink) : sink_(&sink) {}
+    void update(const AnalysisEvent& event) override { sink_->push_back(event); }
+
+private:
+    std::vector<AnalysisEvent>* sink_;
+};
+
+}  // namespace
+
+// A provider failure is contained: no exception escapes analyze(), the
+// result is empty, and observers still see a terminal AnalysisComplete.
+TEST(AnalyzerTest, ProviderFailureIsContainedAndStillCompletes) {
+    std::vector<AnalysisEvent> events;
+    EventDispatcher dispatcher;
+    dispatcher.add_observer(std::make_unique<RecordingObserver>(events));
+
+    Config config;
+    ParserRegistry parsers = ParserRegistry::standard();
+    Analyzer analyzer(config, parsers, &dispatcher);
+    ThrowingProvider provider;
+
+    AnalysisResult result = analyzer.analyze(provider);
+
+    EXPECT_TRUE(result.classes.empty());
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].kind, AnalysisEvent::Kind::AnalysisComplete);
+    EXPECT_EQ(events[0].class_count, 0u);
 }
